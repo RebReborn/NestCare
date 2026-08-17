@@ -1,0 +1,150 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-primary: hsl(142, 72%, 29%);
+  --color-secondary: hsl(38, 92%, 50%);
+  --color-destructive: hsl(0, 84%, 60%);
+  --color-bg: var(--background);
+  --color-card: var(--card-bg);
+  --color-muted-text: var(--muted-text);
+  --color-heading: var(--heading-text);
+  
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-display: 'Outfit', system-ui, sans-serif;
+}
+
+:root {
+  --background: #fafaf9;
+  --foreground: #1c1917;
+  --card-bg: #ffffff;
+  --muted-text: #78716c;
+  --heading-text: #1c1917;
+  --border-color: #e7e5e4;
+}
+
+.dark {
+  --background: #0f172a;
+  --foreground: #f8fafc;
+  --card-bg: #1e293b;
+  --muted-text: #94a3b8;
+  --heading-text: #f8fafc;
+  --border-color: #334155;
+  color-scheme: dark;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  min-height: 100vh;
+  margin: 0;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* ============================================================
+   Dark Mode Explicit Component Overrides
+   ============================================================ */
+
+/* Top Header Bar */
+.dark header,
+.dark .bg-white\/80,
+.dark .bg-white\/90,
+.dark .bg-white\/70 {
+  background-color: rgba(15, 23, 42, 0.85) !important;
+  border-color: #334155 !important;
+  color: #f8fafc !important;
+}
+
+/* Sidebar & Navigation */
+.dark aside,
+.dark nav {
+  background-color: #0f172a !important;
+  border-color: #1e293b !important;
+}
+
+/* Cards, Inputs, Modals */
+.dark .bg-white {
+  background-color: #1e293b !important;
+  color: #f8fafc !important;
+}
+
+.dark .bg-bg {
+  background-color: #0f172a !important;
+}
+
+.dark .bg-stone-50 {
+  background-color: #1e293b !important;
+  color: #cbd5e1 !important;
+}
+
+.dark .bg-stone-100 {
+  background-color: #334155 !important;
+  color: #f1f5f9 !important;
+}
+
+.dark .border-stone-200,
+.dark .border-stone-150,
+.dark .border-stone-100,
+.dark .border-stone-200\/50 {
+  border-color: #334155 !important;
+}
+
+.dark .text-heading {
+  color: #f8fafc !important;
+}
+
+.dark .text-stone-700,
+.dark .text-stone-600,
+.dark .text-stone-500 {
+  color: #cbd5e1 !important;
+}
+
+.dark .text-stone-400 {
+  color: #94a3b8 !important;
+}
+
+.dark .text-muted-text {
+  color: #94a3b8 !important;
+}
+
+/* Custom iOS Safe Area Utilities */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+
+/* Micro-animations */
+.hover-scale {
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.hover-scale:hover {
+  transform: scale(1.02);
+}
+.active-press {
+  transition: transform 0.1s ease;
+}
+.active-press:active {
+  transform: scale(0.96);
+}
+
+/* Mobile active chat full screen override rules */
+@media (max-width: 767px) {
+  body.mobile-chat-active nav {
+    display: none !important;
+  }
+  body.mobile-chat-active main {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    z-index: 100 !important;
+  }
+}
