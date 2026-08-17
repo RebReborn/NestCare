@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { NotificationBell } from '@/components/notifications/notification-bell';
 import { ThemeToggle } from '@/components/theme-toggle';
 
@@ -44,7 +45,9 @@ export function HeaderBar() {
         isShrunk ? 'py-2 shadow-xs' : 'py-3.5'
       }`}
     >
-      <span className="font-display font-black text-heading text-sm tracking-tight md:hidden">NestCare</span>
+      <Link href="/dashboard" className="font-display font-black text-heading text-sm tracking-tight md:hidden active-press">
+        NestCare
+      </Link>
       <div className="hidden md:block" />
       <div className="flex items-center gap-2">
         <ThemeToggle />
