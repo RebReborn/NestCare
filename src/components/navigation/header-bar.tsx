@@ -69,8 +69,9 @@ export function HeaderBar() {
         isShrunk ? 'py-2 shadow-xs' : 'py-3.5'
       }`}
     >
-      <Link href="/dashboard" className="font-display font-black text-heading text-sm tracking-tight md:hidden active-press">
-        NestCare
+      <Link href="/dashboard" className="flex items-center gap-2 md:hidden active-press">
+        <img src="/logo.png" alt="NestCare Logo" className="h-6 w-6 object-contain rounded-md" />
+        <span className="font-display font-black text-heading text-sm tracking-tight">NestCare</span>
       </Link>
       <div className="hidden md:block" />
       <div className="flex items-center gap-3">

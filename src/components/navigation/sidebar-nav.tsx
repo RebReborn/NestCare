@@ -21,8 +21,8 @@ export function SidebarNav() {
 
   return (
     <aside className="hidden md:flex flex-col w-64 h-screen sticky top-0 border-r border-stone-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-6">
-      <Link href="/dashboard" className="flex items-center gap-2 px-3 mb-8 hover:opacity-85 transition-opacity active-press">
-        <ShieldCheck className="h-8 w-8 text-primary" />
+      <Link href="/dashboard" className="flex items-center gap-2.5 px-3 mb-8 hover:opacity-85 transition-opacity active-press">
+        <img src="/logo.png" alt="NestCare Logo" className="h-8 w-8 object-contain rounded-lg" />
         <span className="font-display text-lg font-bold text-heading dark:text-white">NestCare</span>
       </Link>
       <nav className="flex-1 space-y-1">

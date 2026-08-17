@@ -17,6 +17,10 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "NestCare — Trusted Childcare Marketplace",
   description: "Book background-checked childcare providers for in-home babysitting, after-school pickups, and overnight care.",
+  icons: {
+    icon: "/logo.png",
+    apple: "/logo.png",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
