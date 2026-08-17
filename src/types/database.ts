@@ -48,7 +48,9 @@ export interface SitterProfile {
   id: string;
   headline: string | null;
   bio: string | null;
-  hourly_rate: number;
+  base_hourly_rate_cents: number;
+  additional_child_rate_cents: number;
+  pricing_model: 'flat' | 'additional_child' | 'per_child';
   years_experience: number;
   background_check_status: VerificationStatus;
   background_check_date: string | null;
@@ -58,6 +60,7 @@ export interface SitterProfile {
   is_available: boolean;
   minimum_booking_hours: number;
   max_children: number;
+  minimum_notice_hours: number;
   created_at: string;
   updated_at: string;
   services?: string[];
@@ -88,6 +91,9 @@ export interface Child {
   allergies: string | null;
   medical_notes: string | null;
   emergency_information: string | null;
+  medications: string | null;
+  school: string | null;
+  authorized_pickup: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -98,10 +104,11 @@ export interface EmergencyContact {
   name: string;
   relationship: string;
   phone: string;
-  secondary_phone: string | null;
-  notes: string | null;
-  created_at: string;
-  updated_at: string;
+  secondary_phone?: string | null;
+  notes?: string | null;
+  contact_type: 'primary' | 'secondary' | 'doctor';
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface AvailabilityRule {

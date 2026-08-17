@@ -33,7 +33,9 @@ export default function SitterProfilePage() {
             bio,
             sitter_profiles (
               headline,
-              hourly_rate,
+              base_hourly_rate_cents,
+              additional_child_rate_cents,
+              pricing_model,
               years_experience,
               background_check_status,
               minimum_booking_hours,
@@ -105,7 +107,9 @@ export default function SitterProfilePage() {
           avatar_url: profileData.avatar_url || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200',
           headline: profileDetails?.headline || 'Caregiver',
           bio: profileData.bio || 'No biography details provided.',
-          hourly_rate: Number(profileDetails?.hourly_rate || 20),
+          hourly_rate: profileDetails?.base_hourly_rate_cents ? Math.round(Number(profileDetails.base_hourly_rate_cents) / 100) : 20,
+          additional_child_rate: profileDetails?.additional_child_rate_cents ? Math.round(Number(profileDetails.additional_child_rate_cents) / 100) : 0,
+          pricing_model: profileDetails?.pricing_model || 'flat',
           years_experience: profileDetails?.years_experience || 0,
           background_check_status: profileDetails?.background_check_status || 'unverified',
           minimum_booking_hours: profileDetails?.minimum_booking_hours || 1,
@@ -305,6 +309,63 @@ export default function SitterProfilePage() {
                 {service.replace(/_/g, ' ')}
               </span>
             ))}
+          </div>
+        </div>
+
+        {/* Sitter Pricing Details Card */}
+        <div className="bg-white border border-stone-200 rounded-3xl p-6 shadow-sm space-y-4">
+          <div className="border-b border-stone-100 pb-3 flex justify-between items-center">
+            <h2 className="font-display text-sm font-black text-heading uppercase tracking-wider">Pricing Configuration</h2>
+            <span className="text-[9px] bg-indigo-50 text-indigo-800 px-2 py-0.5 rounded-full font-bold uppercase tracking-wide">
+              {sitter.pricing_model === 'flat' ? 'Flat rate' : sitter.pricing_model === 'additional_child' ? 'Add-child' : 'Per-child'}
+            </span>
+          </div>
+
+          <div className="text-xs space-y-2.5 font-semibold text-stone-600">
+            <div className="flex justify-between">
+              <span>Base Hourly Rate:</span>
+              <span className="font-bold text-heading">${sitter.hourly_rate}/hr</span>
+            </div>
+            {sitter.pricing_model === 'additional_child' && (
+              <div className="flex justify-between">
+                <span>Additional Child Rate:</span>
+                <span className="font-bold text-primary">+${sitter.additional_child_rate}/hr</span>
+              </div>
+            )}
+            <div className="flex justify-between">
+              <span>Max Capacity Limit:</span>
+              <span className="font-bold text-red-600">{sitter.max_children} children max</span>
+            </div>
+
+            <div className="h-px bg-stone-100 my-2" />
+
+            <span className="block text-[9.5px] uppercase font-bold tracking-wider text-stone-400">Rate Preview by Child Count</span>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-semibold">
+              {[1, 2, 3, 4].map(numKids => {
+                let pRate = sitter.hourly_rate;
+                if (sitter.pricing_model === 'additional_child') {
+                  pRate = sitter.hourly_rate + Math.max(0, numKids - 1) * (sitter.additional_child_rate || 0);
+                } else if (sitter.pricing_model === 'per_child') {
+                  pRate = sitter.hourly_rate * numKids;
+                }
+                const isOverCap = numKids > sitter.max_children;
+                return (
+                  <div
+                    key={numKids}
+                    className={`p-2.5 border rounded-xl flex flex-col justify-between ${
+                      isOverCap 
+                        ? 'bg-red-50/50 border-red-100 opacity-60 text-red-800' 
+                        : 'bg-stone-50/50 border-stone-150 text-stone-700'
+                    }`}
+                  >
+                    <div className="flex justify-between items-center mb-0.5">
+                      <span className="text-[9px] text-stone-400 font-semibold">{numKids} Child{numKids > 1 ? 'ren' : ''}</span>
+                    </div>
+                    <span className="font-display font-black text-[12px] text-heading">${pRate}/hr</span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { calculateBookingPricing } from '@/lib/payments/pricing-engine';
+import { validateSitterAvailability } from '@/lib/bookings/availability-engine';
 import Stripe from 'stripe';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_mock', {
@@ -17,18 +18,28 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { sitter_id, start_time, end_time } = body;
+    const { sitter_id, start_time, end_time, child_ids } = body;
 
     if (!sitter_id || !start_time || !end_time) {
       return NextResponse.json({ error: 'Missing required parameters: sitter_id, start_time, end_time.' }, { status: 400 });
+    }
+
+    if (!child_ids || !Array.isArray(child_ids) || child_ids.length === 0) {
+      return NextResponse.json({ error: 'At least one child profile must be selected.' }, { status: 400 });
     }
 
     if (sitter_id === user.id) {
       return NextResponse.json({ error: 'You cannot book yourself as a caregiver.' }, { status: 400 });
     }
 
+    // Validate availability settings (shifts, notices, blocked vacations)
+    const availabilityResult = await validateSitterAvailability(supabase, sitter_id, start_time, end_time);
+    if (!availabilityResult.success) {
+      return NextResponse.json({ error: availabilityResult.error || 'Caregiver is not available for this timeframe.' }, { status: 400 });
+    }
+
     // 1. Calculate pricing server-side in integer cents (Never trust client pricing)
-    const pricing = await calculateBookingPricing(supabase, sitter_id, start_time, end_time);
+    const pricing = await calculateBookingPricing(supabase, sitter_id, start_time, end_time, child_ids);
 
     // 2. Concurrency Protection & Atomic Booking Creation
     let bookingId: string | null = null;
@@ -44,6 +55,10 @@ export async function POST(req: NextRequest) {
       p_platform_fee_cents: pricing.platformFeeCents,
       p_tax_cents: pricing.taxCents,
       p_total_cents: pricing.totalCents,
+      p_child_count: pricing.childCount,
+      p_pricing_model: pricing.pricingModel,
+      p_base_hourly_rate_cents: pricing.baseHourlyRateCents,
+      p_additional_child_rate_cents: pricing.additionalChildRateCents,
     });
 
     if (rpcErr) {
@@ -94,10 +109,38 @@ export async function POST(req: NextRequest) {
         platform_fee_cents: pricing.platformFeeCents,
         tax_cents: pricing.taxCents,
         total_cents: pricing.totalCents,
+        child_count: pricing.childCount,
+        pricing_model: pricing.pricingModel,
+        base_hourly_rate_cents: pricing.baseHourlyRateCents,
+        additional_child_rate_cents: pricing.additionalChildRateCents,
       });
     } else {
       bookingId = atomicBookingId;
     }
+
+    // Link child profiles to booking_children
+    if (child_ids && child_ids.length > 0) {
+      await supabase.from('booking_children').insert(
+        child_ids.map((childId: string) => ({
+          booking_id: bookingId!,
+          child_id: childId,
+        }))
+      );
+    }
+
+    // Store care type and pickup details
+    await supabase
+      .from('bookings')
+      .update({
+        care_type: body.care_type || 'in_home',
+        pickup_school: body.pickup_school || null,
+        pickup_time: body.pickup_time || null,
+        pickup_destination: body.pickup_destination || null,
+        pickup_travel_minutes: body.pickup_travel_minutes || null,
+        pickup_required: body.care_type && body.care_type !== 'in_home',
+        pickup_location: body.pickup_school || null,
+      })
+      .eq('id', bookingId!);
 
     // 3. Fetch Sitter Stripe Connect account
     const { data: stripeAcc } = await supabase

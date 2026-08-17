@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
-import { Booking, PricingConfig } from '@/types/database';
+import { calculateBookingPricing } from '@/lib/payments/pricing-engine';
 
 export interface CalculatedPrice {
   hourly_rate: number;
@@ -9,81 +9,40 @@ export interface CalculatedPrice {
   tax: number;
   total: number;
   currency: string;
+  // Audit properties
+  child_count?: number;
+  pricing_model?: 'flat' | 'additional_child' | 'per_child';
+  base_hourly_rate_cents?: number;
+  additional_child_rate_cents?: number;
 }
 
 export async function calculateBookingPrice(
   sitterId: string,
   startTimeStr: string,
-  endTimeStr: string
+  endTimeStr: string,
+  childIds: string[]
 ): Promise<CalculatedPrice> {
   const supabase = await createClient();
-
-  const start = new Date(startTimeStr);
-  const end = new Date(endTimeStr);
-  const durationMs = end.getTime() - start.getTime();
-  const durationMinutes = Math.round(durationMs / 60000);
-
-  if (durationMinutes <= 0) {
-    throw new Error('End time must be after start time.');
-  }
-
-  const { data: sitter, error: sitterError } = await supabase
-    .from('sitter_profiles')
-    .select('hourly_rate')
-    .eq('id', sitterId)
-    .single();
-
-  if (sitterError || !sitter) {
-    throw new Error('Sitter profile not found.');
-  }
-
-  const { data: pricing, error: pricingError } = await supabase
-    .from('pricing_config')
-    .select('*')
-    .eq('is_active', true)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  const activePricing: PricingConfig = pricingError || !pricing
-    ? {
-        id: 'default',
-        platform_percentage: 10.0,
-        min_platform_fee: 2.0,
-        max_platform_fee: 50.0,
-        tax_percentage: 5.0,
-        currency: 'USD',
-        is_active: true,
-        created_at: '',
-        updated_at: '',
-      }
-    : (pricing as unknown as PricingConfig);
-
-  const hourlyRate = Number(sitter.hourly_rate);
-  const hours = durationMinutes / 60;
-  const subtotal = Number((hourlyRate * hours).toFixed(2));
-
-  let platformFee = subtotal * (Number(activePricing.platform_percentage) / 100);
-  platformFee = Math.max(
-    Number(activePricing.min_platform_fee),
-    Math.min(Number(activePricing.max_platform_fee), platformFee)
+  const pricing = await calculateBookingPricing(
+    supabase,
+    sitterId,
+    startTimeStr,
+    endTimeStr,
+    childIds
   );
-  platformFee = Number(platformFee.toFixed(2));
-
-  const tax = Number(
-    ((subtotal + platformFee) * (Number(activePricing.tax_percentage) / 100)).toFixed(2)
-  );
-
-  const total = Number((subtotal + platformFee + tax).toFixed(2));
 
   return {
-    hourly_rate: hourlyRate,
-    duration_minutes: durationMinutes,
-    subtotal,
-    platform_fee: platformFee,
-    tax,
-    total,
-    currency: activePricing.currency,
+    hourly_rate: pricing.hourlyRateCents / 100,
+    duration_minutes: pricing.durationMinutes,
+    subtotal: pricing.subtotalCents / 100,
+    platform_fee: pricing.platformFeeCents / 100,
+    tax: pricing.taxCents / 100,
+    total: pricing.totalCents / 100,
+    currency: pricing.currency,
+    child_count: pricing.childCount,
+    pricing_model: pricing.pricingModel,
+    base_hourly_rate_cents: pricing.baseHourlyRateCents,
+    additional_child_rate_cents: pricing.additionalChildRateCents,
   };
 }
 

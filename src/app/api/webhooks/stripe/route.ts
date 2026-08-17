@@ -71,13 +71,37 @@ export async function POST(req: NextRequest) {
           .eq('stripe_payment_intent_id', intent.id);
 
         if (bookingId) {
-          // Transition Booking state to 'pending_sitter_acceptance' (Separated from Payment state!)
+          // Transition Booking state to 'pending_sitter_acceptance'
           await supabase
             .from('bookings')
             .update({ status: 'pending_sitter_acceptance' })
             .eq('id', bookingId);
 
           console.log(`[Stripe Webhook] Booking ${bookingId} payment succeeded. State -> pending_sitter_acceptance`);
+
+          // Fire payment_confirmed lifecycle notification (non-blocking)
+          const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+          fetch(`${baseUrl}/api/bookings/notify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ bookingId, event: 'payment_confirmed' }),
+          }).catch(e => console.warn('[Webhook Notify]', e.message));
+        }
+        break;
+      }
+
+      case 'transfer.created': {
+        // Payout sent to sitter's Stripe Connect account
+        const transfer = event.data.object as Stripe.Transfer;
+        const bookingId = transfer.metadata?.booking_id;
+
+        if (bookingId) {
+          const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+          fetch(`${baseUrl}/api/bookings/notify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ bookingId, event: 'payout_processed' }),
+          }).catch(e => console.warn('[Webhook Notify Payout]', e.message));
         }
         break;
       }

@@ -26,11 +26,12 @@ import {
   Clock,
   ArrowUpRight,
   Calculator,
-  Activity
+  Activity,
+  Flag
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
-type TabType = 'overview' | 'users' | 'bookings' | 'queue' | 'disputes' | 'settings' | 'audit';
+type TabType = 'overview' | 'users' | 'bookings' | 'queue' | 'disputes' | 'reports' | 'settings' | 'audit';
 
 export default function AdminDashboardPage() {
   const supabase = createClient();
@@ -56,6 +57,7 @@ export default function AdminDashboardPage() {
   const [pendingSitters, setPendingSitters] = useState<any[]>([]);
   const [disputes, setDisputes] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [userReports, setUserReports] = useState<any[]>([]);
   const [pricingConfig, setPricingConfig] = useState<any | null>(null);
 
   // Filters
@@ -122,7 +124,7 @@ export default function AdminDashboardPage() {
         .from('profiles')
         .select(`
           *,
-          sitter_profiles(headline, hourly_rate, bio, years_experience)
+          sitter_profiles(headline, base_hourly_rate_cents, bio, years_experience)
         `)
         .eq('role', 'sitter')
         .in('verification_status', ['pending', 'unverified']);
@@ -165,6 +167,17 @@ export default function AdminDashboardPage() {
         .limit(20);
 
       setAuditLogs(logsData || []);
+
+      // Fetch user reports
+      const { data: reportsData } = await supabase
+        .from('user_reports')
+        .select(`
+          *,
+          reporter:profiles!user_reports_reporter_id_fkey(display_name, email),
+          reported:profiles!user_reports_reported_id_fkey(display_name, email, role)
+        `)
+        .order('created_at', { ascending: false });
+      setUserReports(reportsData || []);
     } catch (err) {
       console.error('Error fetching admin details:', err);
       toast.error('Failed to load admin data.');
@@ -404,6 +417,7 @@ export default function AdminDashboardPage() {
           { id: 'bookings', label: 'Bookings', count: allBookings.length, icon: Calendar },
           { id: 'queue', label: 'Verification Queue', count: pendingSitters.length, icon: ShieldCheck, alert: pendingSitters.length > 0 },
           { id: 'disputes', label: 'Disputes', count: disputes.length, icon: ShieldAlert, alert: disputes.length > 0 },
+          { id: 'reports', label: 'Reports', count: userReports.filter(r => r.status === 'pending').length, icon: Flag, alert: userReports.filter(r => r.status === 'pending').length > 0 },
           { id: 'settings', label: 'Financial Rules', icon: Calculator },
           { id: 'audit', label: 'Audit Logs', icon: FileText },
         ].map((tab) => {
@@ -797,8 +811,8 @@ export default function AdminDashboardPage() {
                   {sitter.sitter_profiles?.[0] && (
                     <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-stone-200 dark:border-slate-800 text-xs space-y-1">
                       <div><strong className="text-stone-500">Headline:</strong> {sitter.sitter_profiles[0].headline || 'Caregiver'}</div>
-                      <div><strong className="text-stone-500">Hourly Rate:</strong> ${sitter.sitter_profiles[0].hourly_rate || 20}/hr</div>
-                      <div><strong className="text-stone-500">Experience:</strong> {sitter.sitter_profiles[0].years_experience || 1} years</div>
+                       <div><strong className="text-stone-500">Hourly Rate:</strong> ${sitter.sitter_profiles[0].base_hourly_rate_cents ? Math.round(sitter.sitter_profiles[0].base_hourly_rate_cents / 100) : 20}/hr</div>
+                       <div><strong className="text-stone-500">Experience:</strong> {sitter.sitter_profiles[0].years_experience || 1} years</div>
                     </div>
                   )}
 
@@ -994,6 +1008,92 @@ export default function AdminDashboardPage() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* TAB 8: USER REPORTS */}
+      {activeTab === 'reports' && (
+        <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-display text-lg font-bold text-heading dark:text-white flex items-center gap-2">
+              <Flag className="h-5 w-5 text-amber-500" /> User Reports
+            </h3>
+            <span className="text-xs bg-amber-50 border border-amber-100 text-amber-700 px-3 py-1 rounded-full font-bold">
+              {userReports.filter(r => r.status === 'pending').length} Pending Review
+            </span>
+          </div>
+
+          {userReports.length === 0 ? (
+            <div className="text-center py-12 bg-stone-50 rounded-2xl border border-stone-100">
+              <Check className="h-8 w-8 text-emerald-500 mx-auto mb-2" />
+              <p className="text-xs font-bold text-stone-700">No reports submitted yet.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {userReports.map((report) => (
+                <div key={report.id} className="p-4 bg-stone-50 dark:bg-slate-800/70 rounded-2xl border border-stone-200 dark:border-slate-700 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-amber-50 rounded-xl">
+                        <Flag className="h-4 w-4 text-amber-500" />
+                      </div>
+                      <div>
+                        <span className="font-bold text-xs text-heading dark:text-white block">
+                          {report.reporter?.display_name || 'Unknown'} → reported → {report.reported?.display_name || 'Unknown'}
+                        </span>
+                        <span className="text-[10px] text-stone-400">{new Date(report.created_at).toLocaleString()} · Role: {report.reported?.role}</span>
+                      </div>
+                    </div>
+                    <span className={`text-[9px] px-2 py-1 rounded-full font-black uppercase tracking-wider ${
+                      report.status === 'pending' ? 'bg-amber-100 text-amber-700' :
+                      report.status === 'resolved' ? 'bg-emerald-100 text-emerald-700' :
+                      'bg-stone-200 text-stone-500'
+                    }`}>{report.status}</span>
+                  </div>
+
+                  <p className="text-xs text-stone-600 dark:text-slate-300 bg-white dark:bg-slate-900 p-3 rounded-xl border border-stone-100 italic">
+                    "{report.reason}"
+                  </p>
+
+                  {report.status === 'pending' && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={async () => {
+                          await supabase.from('user_reports').update({ status: 'resolved' }).eq('id', report.id);
+                          setUserReports(prev => prev.map(r => r.id === report.id ? { ...r, status: 'resolved' } : r));
+                          toast.success('Report marked as resolved.');
+                        }}
+                        className="px-3 py-2 bg-emerald-100 text-emerald-700 rounded-xl text-[10px] font-bold hover:bg-emerald-200 transition-colors active-press"
+                      >
+                        ✓ Resolve
+                      </button>
+                      <button
+                        onClick={async () => {
+                          await supabase.from('user_reports').update({ status: 'dismissed' }).eq('id', report.id);
+                          setUserReports(prev => prev.map(r => r.id === report.id ? { ...r, status: 'dismissed' } : r));
+                          toast.success('Report dismissed.');
+                        }}
+                        className="px-3 py-2 bg-stone-100 text-stone-600 rounded-xl text-[10px] font-bold hover:bg-stone-200 transition-colors active-press"
+                      >
+                        Dismiss
+                      </button>
+                      <button
+                        onClick={async () => {
+                          await supabase.from('profiles').update({ is_suspended: true }).eq('id', report.reported_id);
+                          await supabase.from('user_reports').update({ status: 'resolved' }).eq('id', report.id);
+                          setUserReports(prev => prev.map(r => r.id === report.id ? { ...r, status: 'resolved' } : r));
+                          toast.success('User suspended and report resolved.');
+                        }}
+                        className="px-3 py-2 bg-red-100 text-red-700 rounded-xl text-[10px] font-bold hover:bg-red-200 transition-colors active-press"
+                      >
+                        ⚠ Suspend User
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

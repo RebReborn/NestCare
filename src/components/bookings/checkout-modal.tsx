@@ -204,7 +204,7 @@ export function CheckoutModal({ isOpen, onClose, sitter, childrenList, onSuccess
               <h4 className="font-bold text-stone-400 uppercase tracking-wider text-[10px] mb-1">Itemized Pricing Breakdown</h4>
 
               <div className="flex justify-between">
-                <span className="text-stone-600 dark:text-slate-300">Childcare ({durationHrs} hours × ${sitter.hourlyRate}.00):</span>
+                <span className="text-stone-600 dark:text-slate-300">Childcare ({durationHrs} hours × ${pricing.hourlyRate}/hr):</span>
                 <span className="font-bold text-heading dark:text-white">${pricing.subtotal} CAD</span>
               </div>
 

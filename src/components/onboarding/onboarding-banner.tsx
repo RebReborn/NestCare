@@ -145,7 +145,7 @@ export async function OnboardingBanner() {
       const onboardingStep: number = raw?.onboarding_step ?? 1;
 
       // If explicit onboarding_completed is true, OR sitter profile has completed bio & rates, hide banner
-      const isProfileFullyFilled = raw?.hourly_rate > 0 && raw?.years_experience > 0 && raw?.bio && raw.bio.length > 15 && !raw.bio.startsWith('Tell parents');
+      const isProfileFullyFilled = (Number(raw?.base_hourly_rate_cents || 0) > 0 || Number(raw?.hourly_rate || 0) > 0) && raw?.years_experience > 0 && raw?.bio && raw.bio.length > 15 && !raw.bio.startsWith('Tell parents');
       if (onboardingCompleted || isProfileFullyFilled) {
         return null;
       }

@@ -89,7 +89,7 @@ interface WizardData {
   // Step 5
   availabilityRules: AvailRule[];
   // Step 6
-  hourlyRate: number; minBookingHours: number; additionalChildRate: number;
+  hourlyRate: number; minBookingHours: number; additionalChildRate: number; pricingModel: 'flat' | 'additional_child' | 'per_child'; minimumNoticeHours: number;
   // Step 7
   idSubmitted: boolean;
   // Step 10
@@ -105,7 +105,7 @@ const defaultData: WizardData = {
   languages: [], certs: [], employmentHistory: '',
   services: [],
   availabilityRules: [],
-  hourlyRate: 22, minBookingHours: 2, additionalChildRate: 0,
+  hourlyRate: 22, minBookingHours: 2, additionalChildRate: 0, pricingModel: 'flat', minimumNoticeHours: 0,
   idSubmitted: false,
   offersTransport: false, hasDriversLicense: false, vehicleInfo: '', transportationInsurance: false,
   safetyAgreed: false, providerAgreed: false,
@@ -158,9 +158,11 @@ export default function SitterOnboardingPage() {
           certs: certsData?.map((c: any) => c.cert_type) || [],
           employmentHistory: sp?.employment_history || '',
           services: services?.map((s: any) => s.service_type) || [],
-          hourlyRate: Number(sp?.hourly_rate) || 22,
+          hourlyRate: sp?.base_hourly_rate_cents ? Math.round(Number(sp.base_hourly_rate_cents) / 100) : (Number(sp?.hourly_rate) || 22),
           minBookingHours: sp?.minimum_booking_hours || 2,
-          additionalChildRate: Number(sp?.additional_child_rate) || 0,
+          additionalChildRate: sp?.additional_child_rate_cents ? Math.round(Number(sp.additional_child_rate_cents) / 100) : (Number(sp?.additional_child_rate) || 0),
+          pricingModel: sp?.pricing_model || 'flat',
+          minimumNoticeHours: sp?.minimum_notice_hours || 0,
           availabilityRules: availRules?.map((r: any) => ({
             day: r.day_of_week,
             startTime: r.start_time.substring(0, 5),
@@ -275,15 +277,14 @@ export default function SitterOnboardingPage() {
 
       if (step === 6) {
         await supabase.from('sitter_profiles').update({
-          hourly_rate: data.hourlyRate,
+          base_hourly_rate_cents: data.hourlyRate * 100,
+          additional_child_rate_cents: (data.additionalChildRate || 0) * 100,
+          pricing_model: data.pricingModel || 'flat',
           minimum_booking_hours: data.minBookingHours,
+          max_children: data.maxChildren,
+          minimum_notice_hours: data.minimumNoticeHours,
+          onboarding_step: targetStep,
         }).eq('id', sid);
-        try {
-          await supabase.from('sitter_profiles').update({
-            additional_child_rate: data.additionalChildRate,
-            onboarding_step: targetStep,
-          }).eq('id', sid);
-        } catch (e) {}
       }
 
       if (step === 7 || step === 8) {
@@ -757,10 +758,27 @@ function Step5Availability({ data, setField }: any) {
 
 // ─── Step 6: Pricing ──────────────────────────────────────────
 function Step6Pricing({ data, setField }: any) {
+  const PLATFORM_FEE = 0.10;
   const payout = (data.hourlyRate * (1 - PLATFORM_FEE)).toFixed(2);
+
+  // Live Pricing Preview Math
+  const getPreviewRate = (numKids: number) => {
+    if (data.pricingModel === 'flat') {
+      return data.hourlyRate;
+    }
+    if (data.pricingModel === 'additional_child') {
+      return data.hourlyRate + Math.max(0, numKids - 1) * (data.additionalChildRate || 0);
+    }
+    if (data.pricingModel === 'per_child') {
+      return data.hourlyRate * numKids;
+    }
+    return data.hourlyRate;
+  };
+
   return (
     <div className="space-y-4">
-      <Card title="Hourly Rate" icon={<DollarSign className="h-4 w-4 text-primary" />}>
+      {/* 1. Base Rate Card */}
+      <Card title="Base Hourly Rate" icon={<DollarSign className="h-4 w-4 text-primary" />}>
         <div className="text-center py-2">
           <span className="font-display text-4xl font-black text-heading">${data.hourlyRate}</span>
           <span className="text-stone-400 text-sm font-bold">/hr</span>
@@ -772,34 +790,163 @@ function Step6Pricing({ data, setField }: any) {
           <span>$15/hr</span><span>$75/hr</span>
         </div>
         <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-3.5 mt-2">
-          <p className="text-[10px] text-emerald-700 font-bold uppercase tracking-wide mb-1">Your estimated payout</p>
+          <p className="text-[10px] text-emerald-700 font-bold uppercase tracking-wide mb-1">Your estimated base payout</p>
           <p className="font-display text-xl font-black text-emerald-800">${payout}<span className="text-sm font-bold">/hr</span></p>
           <p className="text-[10px] text-emerald-600 mt-0.5">After NestCare's 10% platform fee</p>
         </div>
       </Card>
 
+      {/* 2. Sitter Booking Preferences */}
       <Card title="Booking Preferences">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-3.5">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Min. Booking Duration</label>
+              <select value={data.minBookingHours} onChange={e => setField('minBookingHours', Number(e.target.value))}
+                className="w-full p-3.5 rounded-2xl border border-stone-200 text-xs bg-stone-50 outline-none focus:border-primary appearance-none font-bold">
+                {[1, 2, 3, 4, 5].map(h => <option key={h} value={h}>{h} hour{h > 1 ? 's' : ''}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Max Children Capacity</label>
+              <input type="number" min={1} max={10} value={data.maxChildren}
+                onChange={e => setField('maxChildren', Number(e.target.value))}
+                className="w-full p-3.5 rounded-2xl border border-stone-200 text-xs bg-stone-50 outline-none focus:border-primary font-bold" />
+            </div>
+          </div>
           <div>
-            <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Min. Booking Duration</label>
-            <select value={data.minBookingHours} onChange={e => setField('minBookingHours', Number(e.target.value))}
-              className="w-full p-3.5 rounded-2xl border border-stone-200 text-xs bg-stone-50 outline-none focus:border-primary appearance-none">
-              {[1, 2, 3, 4, 5].map(h => <option key={h} value={h}>{h} hour{h > 1 ? 's' : ''}</option>)}
+            <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Minimum Booking Notice Required</label>
+            <select value={data.minimumNoticeHours} onChange={e => setField('minimumNoticeHours', Number(e.target.value))}
+              className="w-full p-3.5 rounded-2xl border border-stone-200 text-xs bg-stone-50 outline-none focus:border-primary appearance-none font-bold">
+              <option value={0}>Same day (no notice required)</option>
+              <option value={2}>2 hours notice</option>
+              <option value={6}>6 hours notice</option>
+              <option value={12}>12 hours notice</option>
+              <option value={24}>24 hours (1 day) notice</option>
+              <option value={48}>48 hours (2 days) notice</option>
             </select>
           </div>
-          <div>
-            <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Max Children</label>
-            <input type="number" min={1} max={10} value={data.maxChildren}
-              onChange={e => setField('maxChildren', Number(e.target.value))}
-              className="w-full p-3.5 rounded-2xl border border-stone-200 text-xs bg-stone-50 outline-none focus:border-primary" />
-          </div>
         </div>
-        <div>
-          <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Additional Child Rate ($/hr, optional)</label>
-          <input type="number" min={0} max={20} step={0.5} value={data.additionalChildRate}
-            onChange={e => setField('additionalChildRate', Number(e.target.value))}
-            className="w-full p-3.5 rounded-2xl border border-stone-200 text-xs bg-stone-50 outline-none focus:border-primary"
-            placeholder="e.g. 5 (for $5 extra per additional child)" />
+      </Card>
+
+      {/* 3. Pricing Model Selection */}
+      <Card title="Multiple Children Pricing">
+        <label className="block text-[10px] font-bold text-stone-400 uppercase mb-2">How do you charge for multiple children?</label>
+        
+        <div className="space-y-2">
+          {/* Option A: Flat Rate */}
+          <button
+            type="button"
+            onClick={() => setField('pricingModel', 'flat')}
+            className={`w-full p-4 border rounded-2xl text-left transition-all active-press flex items-start gap-3 w-full ${
+              data.pricingModel === 'flat' ? 'border-primary bg-emerald-50/45' : 'border-stone-200 hover:bg-stone-50'
+            }`}
+          >
+            <div className={`mt-0.5 h-4 w-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+              data.pricingModel === 'flat' ? 'border-primary text-primary' : 'border-stone-300'
+            }`}>
+              {data.pricingModel === 'flat' && <div className="h-2 w-2 rounded-full bg-primary" />}
+            </div>
+            <div>
+              <strong className="block text-xs text-heading">Flat hourly rate</strong>
+              <span className="text-[10px] text-stone-500">${data.hourlyRate}/hour regardless of number of children.</span>
+            </div>
+          </button>
+
+          {/* Option B: Additional Child */}
+          <button
+            type="button"
+            onClick={() => setField('pricingModel', 'additional_child')}
+            className={`w-full p-4 border rounded-2xl text-left transition-all active-press flex items-start gap-3 w-full ${
+              data.pricingModel === 'additional_child' ? 'border-primary bg-emerald-50/45' : 'border-stone-200 hover:bg-stone-50'
+            }`}
+          >
+            <div className={`mt-0.5 h-4 w-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+              data.pricingModel === 'additional_child' ? 'border-primary text-primary' : 'border-stone-300'
+            }`}>
+              {data.pricingModel === 'additional_child' && <div className="h-2 w-2 rounded-full bg-primary" />}
+            </div>
+            <div className="flex-1">
+              <strong className="block text-xs text-heading">Additional-child pricing</strong>
+              <span className="text-[10px] text-stone-500">
+                ${data.hourlyRate}/hour for first child, plus an incremental rate for each extra child.
+              </span>
+            </div>
+          </button>
+
+          {/* Option C: Per Child */}
+          <button
+            type="button"
+            onClick={() => setField('pricingModel', 'per_child')}
+            className={`w-full p-4 border rounded-2xl text-left transition-all active-press flex items-start gap-3 w-full ${
+              data.pricingModel === 'per_child' ? 'border-primary bg-emerald-50/45' : 'border-stone-200 hover:bg-stone-50'
+            }`}
+          >
+            <div className={`mt-0.5 h-4 w-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+              data.pricingModel === 'per_child' ? 'border-primary text-primary' : 'border-stone-300'
+            }`}>
+              {data.pricingModel === 'per_child' && <div className="h-2 w-2 rounded-full bg-primary" />}
+            </div>
+            <div>
+              <strong className="block text-xs text-heading">Per-child pricing</strong>
+              <span className="text-[10px] text-stone-500">${data.hourlyRate}/hour per child.</span>
+            </div>
+          </button>
+        </div>
+
+        {/* Incremental Rate input if Additional Child is selected */}
+        {data.pricingModel === 'additional_child' && (
+          <div className="mt-4 p-4 bg-stone-50 rounded-2xl border border-stone-200 space-y-2 animate-fadeIn">
+            <label className="block text-[10px] font-bold text-stone-400 uppercase">
+              Additional Child Rate ($/hr)
+            </label>
+            <input
+              type="number"
+              min={0}
+              max={25}
+              step={0.5}
+              value={data.additionalChildRate}
+              onChange={e => setField('additionalChildRate', Number(e.target.value))}
+              className="w-full p-3 rounded-xl border border-stone-200 text-xs bg-white outline-none focus:border-primary"
+              placeholder="e.g. 5"
+            />
+            <p className="text-[9px] text-stone-400 font-semibold">Each additional child adds ${data.additionalChildRate}/hr to your base rate.</p>
+          </div>
+        )}
+      </Card>
+
+      {/* 4. Live Pricing Preview Matrix */}
+      <Card title="Live Pricing Preview" icon={<Sparkles className="h-4 w-4 text-amber-500" />}>
+        <p className="text-[10.5px] text-stone-500 mb-3 font-semibold">Here is a live calculation showing exactly what parents will see based on child count:</p>
+        <div className="grid grid-cols-2 gap-2 text-xs font-semibold">
+          {[1, 2, 3, 4].map(numKids => {
+            const calculatedRate = getPreviewRate(numKids);
+            const exceedsCap = numKids > data.maxChildren;
+            return (
+              <div
+                key={numKids}
+                className={`p-3 rounded-xl border flex flex-col justify-between ${
+                  exceedsCap 
+                    ? 'bg-red-50/50 border-red-100 opacity-60 text-red-700' 
+                    : 'bg-stone-50 border-stone-150 text-stone-700'
+                }`}
+              >
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-[10px] uppercase font-bold text-stone-400">
+                    {numKids} Child{numKids > 1 ? 'ren' : ''}
+                  </span>
+                  {exceedsCap && (
+                    <span className="text-[8px] bg-red-100 text-red-800 px-1.5 py-0.5 rounded-full font-black font-display uppercase tracking-wider">
+                      Over Cap
+                    </span>
+                  )}
+                </div>
+                <div className="font-display text-lg font-black text-heading">
+                  ${calculatedRate}/hr
+                </div>
+              </div>
+            );
+          })}
         </div>
       </Card>
     </div>

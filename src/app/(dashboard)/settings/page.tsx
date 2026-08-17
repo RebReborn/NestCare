@@ -29,6 +29,9 @@ export default function SettingsPage() {
   const [newChildGroup, setNewChildGroup] = useState('toddler');
   const [newChildAllergies, setNewChildAllergies] = useState('');
   const [newChildNotes, setNewChildNotes] = useState('');
+  const [newChildMedications, setNewChildMedications] = useState('');
+  const [newChildSchool, setNewChildSchool] = useState('');
+  const [newChildAuthorizedPickup, setNewChildAuthorizedPickup] = useState(true);
 
   // Editing Child states
   const [editingChild, setEditingChild] = useState<any | null>(null);
@@ -37,6 +40,24 @@ export default function SettingsPage() {
   const [editChildGroup, setEditChildGroup] = useState('toddler');
   const [editChildAllergies, setEditChildAllergies] = useState('');
   const [editChildNotes, setEditChildNotes] = useState('');
+  const [editChildMedications, setEditChildMedications] = useState('');
+  const [editChildSchool, setEditChildSchool] = useState('');
+  const [editChildAuthorizedPickup, setEditChildAuthorizedPickup] = useState(true);
+
+  // Emergency Contacts state
+  const [primaryName, setPrimaryName] = useState('');
+  const [primaryPhone, setPrimaryPhone] = useState('');
+  const [primaryRelation, setPrimaryRelation] = useState('');
+
+  const [secondaryName, setSecondaryName] = useState('');
+  const [secondaryPhone, setSecondaryPhone] = useState('');
+  const [secondaryRelation, setSecondaryRelation] = useState('');
+
+  const [doctorName, setDoctorName] = useState('');
+  const [doctorPhone, setDoctorPhone] = useState('');
+  const [doctorClinic, setDoctorClinic] = useState('');
+  
+  const [savingContacts, setSavingContacts] = useState(false);
 
   // Deactivate account panel state
   const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false);
@@ -86,6 +107,32 @@ export default function SettingsPage() {
               .select('*')
               .eq('parent_id', user.id);
             setChildren(kids || []);
+
+            // Fetch emergency contacts
+            const { data: contacts } = await supabase
+              .from('emergency_contacts')
+              .select('*')
+              .eq('parent_id', user.id);
+
+            const primary = contacts?.find(c => c.contact_type === 'primary');
+            const secondary = contacts?.find(c => c.contact_type === 'secondary');
+            const doctor = contacts?.find(c => c.contact_type === 'doctor');
+
+            if (primary) {
+              setPrimaryName(primary.name || '');
+              setPrimaryPhone(primary.phone || '');
+              setPrimaryRelation(primary.relationship || '');
+            }
+            if (secondary) {
+              setSecondaryName(secondary.name || '');
+              setSecondaryPhone(secondary.phone || '');
+              setSecondaryRelation(secondary.relationship || '');
+            }
+            if (doctor) {
+              setDoctorName(doctor.name || '');
+              setDoctorPhone(doctor.phone || '');
+              setDoctorClinic(doctor.notes || '');
+            }
           }
 
           // Fetch Stripe Connect status
@@ -168,6 +215,9 @@ export default function SettingsPage() {
           age_group: newChildGroup,
           allergies: newChildAllergies.trim() || null,
           special_instructions: newChildNotes.trim() || null,
+          medications: newChildMedications.trim() || null,
+          school: newChildSchool.trim() || null,
+          authorized_pickup: newChildAuthorizedPickup,
         })
         .select()
         .single();
@@ -178,6 +228,9 @@ export default function SettingsPage() {
       setNewChildDob('');
       setNewChildAllergies('');
       setNewChildNotes('');
+      setNewChildMedications('');
+      setNewChildSchool('');
+      setNewChildAuthorizedPickup(true);
       toast.success('Child profile added successfully!');
     } catch (err: any) {
       toast.error(err.message || 'Failed to add child.');
@@ -197,6 +250,9 @@ export default function SettingsPage() {
           age_group: editChildGroup,
           allergies: editChildAllergies.trim() || null,
           special_instructions: editChildNotes.trim() || null,
+          medications: editChildMedications.trim() || null,
+          school: editChildSchool.trim() || null,
+          authorized_pickup: editChildAuthorizedPickup,
         })
         .eq('id', editingChild.id)
         .select()
@@ -211,6 +267,60 @@ export default function SettingsPage() {
     }
   };
 
+  const handleSaveEmergencyContacts = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile) return;
+
+    try {
+      setSavingContacts(true);
+
+      const contactUpserts = [];
+
+      if (primaryName || primaryPhone) {
+        contactUpserts.push({
+          parent_id: profile.id,
+          contact_type: 'primary',
+          name: primaryName,
+          phone: primaryPhone,
+          relationship: primaryRelation || 'Primary Contact',
+        });
+      }
+      if (secondaryName || secondaryPhone) {
+        contactUpserts.push({
+          parent_id: profile.id,
+          contact_type: 'secondary',
+          name: secondaryName,
+          phone: secondaryPhone,
+          relationship: secondaryRelation || 'Secondary Contact',
+        });
+      }
+      if (doctorName || doctorPhone) {
+        contactUpserts.push({
+          parent_id: profile.id,
+          contact_type: 'doctor',
+          name: doctorName,
+          phone: doctorPhone,
+          relationship: 'Pediatrician',
+          notes: doctorClinic || null,
+        });
+      }
+
+      if (contactUpserts.length > 0) {
+        const { error } = await supabase
+          .from('emergency_contacts')
+          .upsert(contactUpserts, { onConflict: 'parent_id, contact_type' });
+
+        if (error) throw error;
+      }
+
+      toast.success('Emergency contacts saved successfully!');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save emergency contacts.');
+    } finally {
+      setSavingContacts(false);
+    }
+  };
+
   const startEditingChild = (child: any) => {
     setEditingChild(child);
     setEditChildName(child.first_name);
@@ -218,6 +328,9 @@ export default function SettingsPage() {
     setEditChildGroup(child.age_group || 'toddler');
     setEditChildAllergies(child.allergies || '');
     setEditChildNotes(child.special_instructions || '');
+    setEditChildMedications(child.medications || '');
+    setEditChildSchool(child.school || '');
+    setEditChildAuthorizedPickup(child.authorized_pickup ?? true);
   };
 
   const handleDeleteChild = async (childId: string) => {
@@ -522,14 +635,33 @@ export default function SettingsPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
                 {children.map((c) => (
                   <div key={c.id} className="p-4 bg-stone-50 rounded-2xl border border-stone-150 flex items-center justify-between shadow-xs">
-                    <div className="space-y-0.5">
+                    <div className="space-y-1">
                       <span className="font-bold text-xs text-heading block">👶 {c.first_name}</span>
                       <span className="text-[10px] text-stone-450 block font-semibold capitalize">{c.age_group} • {c.date_of_birth}</span>
-                      {c.allergies && (
-                        <span className="text-[9px] block text-red-700 font-bold bg-red-50 border border-red-100 rounded-lg px-2 py-0.5 mt-1 self-start w-fit">
-                          ⚠️ Allergies: {c.allergies}
+                      <div className="flex flex-wrap gap-1.5 pt-0.5">
+                        {c.school && (
+                          <span className="text-[9px] block text-blue-700 font-bold bg-blue-50 border border-blue-100 rounded-lg px-2 py-0.5 self-start w-fit">
+                            🏫 School: {c.school}
+                          </span>
+                        )}
+                        {c.allergies && (
+                          <span className="text-[9px] block text-red-700 font-bold bg-red-50 border border-red-100 rounded-lg px-2 py-0.5 self-start w-fit">
+                            ⚠️ Allergies: {c.allergies}
+                          </span>
+                        )}
+                        {c.medications && (
+                          <span className="text-[9px] block text-amber-700 font-bold bg-amber-50 border border-amber-100 rounded-lg px-2 py-0.5 self-start w-fit">
+                            💊 Medications: {c.medications}
+                          </span>
+                        )}
+                        <span className={`text-[9px] block font-bold border rounded-lg px-2 py-0.5 self-start w-fit ${
+                          c.authorized_pickup 
+                            ? 'text-emerald-700 bg-emerald-50 border-emerald-100' 
+                            : 'text-red-700 bg-red-50 border-red-100'
+                        }`}>
+                          {c.authorized_pickup ? '✓ Authorized Pickup' : '✗ No Pickup Auth'}
                         </span>
-                      )}
+                      </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       <button
@@ -600,6 +732,39 @@ export default function SettingsPage() {
                 />
               </div>
             </div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div>
+                <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">School / Daycare Name</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Lincoln Elementary"
+                  value={newChildSchool}
+                  onChange={(e) => setNewChildSchool(e.target.value)}
+                  className="w-full p-3 rounded-xl border border-stone-200 bg-stone-50 outline-none text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Medications</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Asthma Inhaler"
+                  value={newChildMedications}
+                  onChange={(e) => setNewChildMedications(e.target.value)}
+                  className="w-full p-3 rounded-xl border border-stone-200 bg-stone-50 outline-none text-xs"
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-2 py-1 text-xs">
+              <label className="flex items-center gap-2 cursor-pointer font-semibold">
+                <input
+                  type="checkbox"
+                  checked={newChildAuthorizedPickup}
+                  onChange={(e) => setNewChildAuthorizedPickup(e.target.checked)}
+                  className="rounded accent-primary"
+                />
+                Sitter authorized for pickup?
+              </label>
+            </div>
             <div>
               <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Special Instructions & Medical Notes</label>
               <textarea
@@ -616,6 +781,151 @@ export default function SettingsPage() {
               className="w-full py-3 bg-primary/10 text-primary hover:bg-primary/20 text-xs font-bold rounded-xl active-press transition-colors flex items-center justify-center gap-1"
             >
               <Plus className="h-4.5 w-4.5" /> Register Child
+            </button>
+          </form>
+        </div>
+      )}
+
+      {/* Emergency Contacts configuration */}
+      {profile?.role === 'parent' && (
+        <div className="bg-white border border-stone-200 rounded-3xl p-6 shadow-sm space-y-5">
+          <div>
+            <h3 className="font-display text-sm font-bold text-heading flex items-center gap-2">
+              <ShieldAlert className="h-5 w-5 text-red-500" /> Emergency Contacts Policy
+            </h3>
+            <p className="text-xs text-stone-400 mt-1">Configure emergency contacts. Sitter will get one-click access during active bookings.</p>
+          </div>
+
+          <form onSubmit={handleSaveEmergencyContacts} className="space-y-4 text-xs">
+            {/* Primary Contact */}
+            <div className="space-y-2 border-b border-stone-100 pb-3">
+              <h4 className="font-bold text-xs text-heading flex items-center gap-1.5 text-stone-700 font-semibold">
+                <span className="h-2 w-2 rounded-full bg-red-500 inline-block" /> Primary Emergency Contact
+              </h4>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="block text-[9px] font-bold text-stone-400 uppercase mb-0.5">Name</label>
+                  <input
+                    type="text"
+                    placeholder="Jane Doe"
+                    value={primaryName}
+                    onChange={(e) => setPrimaryName(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-stone-200 bg-stone-50 outline-none font-semibold text-stone-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[9px] font-bold text-stone-400 uppercase mb-0.5">Phone</label>
+                  <input
+                    type="text"
+                    placeholder="555-0199"
+                    value={primaryPhone}
+                    onChange={(e) => setPrimaryPhone(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-stone-200 bg-stone-50 outline-none font-semibold text-stone-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[9px] font-bold text-stone-400 uppercase mb-0.5">Relationship</label>
+                  <input
+                    type="text"
+                    placeholder="Mother / Spouse"
+                    value={primaryRelation}
+                    onChange={(e) => setPrimaryRelation(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-stone-200 bg-stone-50 outline-none font-semibold text-stone-800"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Secondary Contact */}
+            <div className="space-y-2 border-b border-stone-100 pb-3">
+              <h4 className="font-bold text-xs text-heading flex items-center gap-1.5 text-stone-700 font-semibold">
+                <span className="h-2 w-2 rounded-full bg-amber-500 inline-block" /> Secondary Emergency Contact
+              </h4>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="block text-[9px] font-bold text-stone-400 uppercase mb-0.5">Name</label>
+                  <input
+                    type="text"
+                    placeholder="John Doe"
+                    value={secondaryName}
+                    onChange={(e) => setSecondaryName(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-stone-200 bg-stone-50 outline-none font-semibold text-stone-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[9px] font-bold text-stone-400 uppercase mb-0.5">Phone</label>
+                  <input
+                    type="text"
+                    placeholder="555-0188"
+                    value={secondaryPhone}
+                    onChange={(e) => setSecondaryPhone(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-stone-200 bg-stone-50 outline-none font-semibold text-stone-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[9px] font-bold text-stone-400 uppercase mb-0.5">Relationship</label>
+                  <input
+                    type="text"
+                    placeholder="Uncle / Friend"
+                    value={secondaryRelation}
+                    onChange={(e) => setSecondaryRelation(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-stone-200 bg-stone-50 outline-none font-semibold text-stone-800"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Doctor / Pediatrician */}
+            <div className="space-y-2 pb-1">
+              <h4 className="font-bold text-xs text-heading flex items-center gap-1.5 text-stone-700 font-semibold">
+                <span className="h-2 w-2 rounded-full bg-blue-500 inline-block" /> Doctor / Pediatrician
+              </h4>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="block text-[9px] font-bold text-stone-400 uppercase mb-0.5">Doctor Name</label>
+                  <input
+                    type="text"
+                    placeholder="Dr. Smith"
+                    value={doctorName}
+                    onChange={(e) => setDoctorName(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-stone-200 bg-stone-50 outline-none font-semibold text-stone-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[9px] font-bold text-stone-400 uppercase mb-0.5">Doctor Phone</label>
+                  <input
+                    type="text"
+                    placeholder="555-0177"
+                    value={doctorPhone}
+                    onChange={(e) => setDoctorPhone(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-stone-200 bg-stone-50 outline-none font-semibold text-stone-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[9px] font-bold text-stone-400 uppercase mb-0.5">Clinic / Notes</label>
+                  <input
+                    type="text"
+                    placeholder="Sunny Kids Clinic"
+                    value={doctorClinic}
+                    onChange={(e) => setDoctorClinic(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-stone-200 bg-stone-50 outline-none font-semibold text-stone-800"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={savingContacts}
+              className="w-full py-3.5 bg-primary text-white text-xs font-bold rounded-2xl active-press hover:bg-emerald-800 disabled:opacity-50 transition-colors flex justify-center items-center gap-1.5 shadow-sm font-semibold"
+            >
+              {savingContacts ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <>
+                  <Save className="h-4.5 w-4.5" /> Save Emergency Contacts
+                </>
+              )}
             </button>
           </form>
         </div>
@@ -681,6 +991,39 @@ export default function SettingsPage() {
                     className="w-full p-3 rounded-xl border border-stone-200 bg-stone-50 outline-none"
                   />
                 </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <label className="block text-[9px] font-bold text-stone-400 uppercase mb-1">School / Daycare</label>
+                  <input
+                    type="text"
+                    value={editChildSchool}
+                    onChange={(e) => setEditChildSchool(e.target.value)}
+                    className="w-full p-3 rounded-xl border border-stone-200 bg-stone-50 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[9px] font-bold text-stone-400 uppercase mb-1">Medications</label>
+                  <input
+                    type="text"
+                    value={editChildMedications}
+                    onChange={(e) => setEditChildMedications(e.target.value)}
+                    className="w-full p-3 rounded-xl border border-stone-200 bg-stone-50 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 py-1 text-xs">
+                <label className="flex items-center gap-2 cursor-pointer font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={editChildAuthorizedPickup}
+                    onChange={(e) => setEditChildAuthorizedPickup(e.target.checked)}
+                    className="rounded accent-primary"
+                  />
+                  Sitter authorized for pickup?
+                </label>
               </div>
 
               <div>

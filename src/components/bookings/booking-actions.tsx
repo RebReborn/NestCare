@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2, Check, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
-
 import { toast } from 'sonner';
 
 export function BookingActions({ bookingId }: { bookingId: string }) {
@@ -23,16 +22,13 @@ export function BookingActions({ bookingId }: { bookingId: string }) {
       if (error) throw error;
       toast.success(status === 'accepted' ? 'Booking request accepted!' : 'Booking request declined');
 
-      // Dispatch async email notification to parent
-      fetch('/api/notifications/email', {
+      // Fire lifecycle notification (non-blocking)
+      const event = status === 'accepted' ? 'sitter_accepted' : 'sitter_declined';
+      fetch('/api/bookings/notify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'booking_status',
-          recipientId: bookingId, // API looks up booking details
-          payload: { status, sitterName: 'Sitter', bookingDate: 'Scheduled Date' },
-        }),
-      }).catch(e => console.warn('[Email Trigger Error]:', e));
+        body: JSON.stringify({ bookingId, event }),
+      }).catch(e => console.warn('[Notify Error]:', e));
 
       router.refresh();
     } catch (err: any) {

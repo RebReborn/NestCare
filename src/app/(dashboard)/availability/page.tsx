@@ -47,6 +47,10 @@ export default function AvailabilityPage() {
   const [exceptionReason, setExceptionReason] = useState('');
   const [submittingException, setSubmittingException] = useState(false);
 
+  // Booking notice state
+  const [minimumNoticeHours, setMinimumNoticeHours] = useState(0);
+  const [savingNotice, setSavingNotice] = useState(false);
+
   useEffect(() => {
     async function loadAvailability() {
       try {
@@ -60,7 +64,10 @@ export default function AvailabilityPage() {
         // Check if user is a sitter
         const { data: profile } = await supabase
           .from('profiles')
-          .select('role')
+          .select(`
+            role,
+            sitter_profiles(minimum_notice_hours)
+          `)
           .eq('id', user.id)
           .single();
 
@@ -69,6 +76,9 @@ export default function AvailabilityPage() {
           router.push('/dashboard');
           return;
         }
+
+        const sp = Array.isArray(profile?.sitter_profiles) ? profile.sitter_profiles[0] : profile?.sitter_profiles;
+        setMinimumNoticeHours(sp?.minimum_notice_hours || 0);
 
         setSitterId(user.id);
 
@@ -188,6 +198,25 @@ export default function AvailabilityPage() {
       toast.error(err.message || 'Failed to save weekly recurring rules.');
     } finally {
       setSavingRules(false);
+    }
+  };
+
+  const handleSaveNotice = async () => {
+    if (!sitterId) return;
+
+    try {
+      setSavingNotice(true);
+      const { error } = await supabase
+        .from('sitter_profiles')
+        .update({ minimum_notice_hours: minimumNoticeHours })
+        .eq('id', sitterId);
+
+      if (error) throw error;
+      toast.success('Booking notice requirements updated successfully!');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save notice requirements.');
+    } finally {
+      setSavingNotice(false);
     }
   };
 
@@ -350,6 +379,48 @@ export default function AvailabilityPage() {
             </>
           )}
         </button>
+      </div>
+
+      {/* Booking Notice Policy Card */}
+      <div className="bg-white border border-stone-200 rounded-3xl p-6 shadow-sm space-y-5">
+        <div>
+          <h2 className="font-display text-base font-bold text-heading flex items-center gap-2">
+            <Clock className="h-5 w-5 text-primary" /> Booking Notice Policy
+          </h2>
+          <p className="text-[11px] text-stone-400 mt-1">Specify how much advance warning you require before a parent can book your care services.</p>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Minimum notice required</label>
+            <select
+              value={minimumNoticeHours}
+              onChange={(e) => setMinimumNoticeHours(Number(e.target.value))}
+              className="w-full p-3.5 rounded-2xl border border-stone-200 outline-none text-xs bg-stone-50 font-bold"
+            >
+              <option value={0}>Same day (no notice required)</option>
+              <option value={2}>2 hours notice</option>
+              <option value={6}>6 hours notice</option>
+              <option value={12}>12 hours notice</option>
+              <option value={24}>24 hours (1 day) notice</option>
+              <option value={48}>48 hours (2 days) notice</option>
+            </select>
+          </div>
+
+          <button
+            onClick={handleSaveNotice}
+            disabled={savingNotice}
+            className="w-full py-3.5 bg-primary text-white text-xs font-bold rounded-2xl active-press hover:bg-emerald-800 disabled:opacity-50 transition-colors flex justify-center items-center gap-1.5"
+          >
+            {savingNotice ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <>
+                <Save className="h-4.5 w-4.5" /> Save Notice Policy
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Exceptions/Vacations card */}

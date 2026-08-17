@@ -149,6 +149,7 @@ export function renderBookingStatusEmail({
   return { html, text };
 }
 
+
 // ── 3. Unread Message Digest Template ───────────────────────
 export function renderMessageDigestEmail({
   recipientName,
@@ -178,6 +179,79 @@ export function renderMessageDigestEmail({
   `;
 
   const text = `Hi ${recipientName}, you have a new message from ${senderName}: "${messagePreview}". Reply at: http://localhost:3000/messages`;
+
+  return { html, text };
+}
+
+// ── 4. Lifecycle Event Email Template ────────────────────────
+// Handles all 12 booking lifecycle events with a unified, polished template
+export function renderLifecycleEmail({
+  title,
+  body,
+  recipientName,
+  bookingDate,
+  ctaText = 'View Booking',
+  ctaUrl = 'http://localhost:3000/bookings',
+  accentColor = '#15803d',
+  emoji = '📬',
+}: {
+  title: string;
+  body: string;
+  recipientName: string;
+  bookingDate: string;
+  ctaText?: string;
+  ctaUrl?: string;
+  accentColor?: string;
+  emoji?: string;
+}) {
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/></head>
+    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; background-color: #fafaf9; margin: 0; padding: 20px;">
+      <div style="max-width: 560px; margin: 0 auto;">
+        <!-- Header -->
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 24px; padding: 0 4px;">
+          <div style="background: #15803d; width: 28px; height: 28px; border-radius: 8px; display: inline-block; vertical-align: middle;"></div>
+          <span style="font-size: 18px; font-weight: 900; color: #1c1917; margin-left: 8px; vertical-align: middle;">NestCare</span>
+        </div>
+
+        <!-- Card -->
+        <div style="background: #ffffff; border-radius: 20px; border: 1px solid #e7e5e4; padding: 32px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.04);">
+          <!-- Emoji icon -->
+          <div style="font-size: 36px; margin-bottom: 16px;">${emoji}</div>
+
+          <h1 style="font-size: 20px; font-weight: 800; color: #1c1917; margin: 0 0 12px 0; line-height: 1.3;">${title}</h1>
+
+          <p style="font-size: 14px; color: #57534e; line-height: 1.7; margin: 0 0 20px 0;">
+            Hi <strong>${recipientName}</strong>, ${body}
+          </p>
+
+          <!-- Booking date pill -->
+          <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 12px 16px; margin-bottom: 24px; display: inline-block;">
+            <span style="font-size: 12px; font-weight: 700; color: #15803d; text-transform: uppercase; letter-spacing: 0.05em;">📅 Session Date</span>
+            <p style="margin: 4px 0 0; font-size: 15px; font-weight: 800; color: #14532d;">${bookingDate}</p>
+          </div>
+
+          <!-- CTA Button -->
+          <div style="margin-top: 8px;">
+            <a href="${ctaUrl}" style="display: inline-block; background: ${accentColor}; color: #ffffff; padding: 14px 28px; border-radius: 14px; font-weight: 700; font-size: 14px; text-decoration: none;">
+              ${ctaText} →
+            </a>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <p style="font-size: 11px; color: #a8a29e; text-align: center; margin-top: 24px;">
+          © ${new Date().getFullYear()} NestCare Inc. · Trusted Childcare Marketplace<br/>
+          <a href="http://localhost:3000/settings" style="color: #a8a29e;">Manage notification preferences</a>
+        </p>
+      </div>
+    </body>
+    </html>
+  `;
+
+  const text = `Hi ${recipientName}, ${body} | Session Date: ${bookingDate} | ${ctaText}: ${ctaUrl}`;
 
   return { html, text };
 }

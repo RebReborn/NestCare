@@ -52,7 +52,10 @@ export default function ProfilePage() {
 
   // Sitter Gallery fields
   const [galleryUrls, setGalleryUrls] = useState<string[]>(['']);
+  const [additionalChildRate, setAdditionalChildRate] = useState(5);
+  const [pricingModel, setPricingModel] = useState<'flat' | 'additional_child' | 'per_child'>('flat');
   const [coverUrl, setCoverUrl] = useState('');
+  const [minimumNoticeHours, setMinimumNoticeHours] = useState(0);
 
   // Sitter availability summary
   const [availRules, setAvailRules] = useState<any[]>([]);
@@ -99,9 +102,12 @@ export default function ProfilePage() {
               .from('sitter_profiles')
               .select(`
                 headline,
-                hourly_rate,
+                base_hourly_rate_cents,
+                additional_child_rate_cents,
+                pricing_model,
                 years_experience,
                 max_children,
+                minimum_notice_hours,
                 gallery_urls,
                 cover_url,
                 sitter_services(service_type),
@@ -112,9 +118,12 @@ export default function ProfilePage() {
 
             if (sitterDetails) {
               setHeadline(sitterDetails.headline || '');
-              setHourlyRate(Number(sitterDetails.hourly_rate || 18));
+              setHourlyRate(sitterDetails.base_hourly_rate_cents ? Math.round(Number(sitterDetails.base_hourly_rate_cents) / 100) : 18);
+              setAdditionalChildRate(sitterDetails.additional_child_rate_cents ? Math.round(Number(sitterDetails.additional_child_rate_cents) / 100) : 5);
+              setPricingModel((sitterDetails.pricing_model || 'flat') as any);
               setYearsExperience(sitterDetails.years_experience || 0);
               setMaxChildren(sitterDetails.max_children || 3);
+              setMinimumNoticeHours(sitterDetails.minimum_notice_hours || 0);
               
               const sList = (sitterDetails as any).sitter_services?.map((s: any) => s.service_type) || [];
               const lList = (sitterDetails as any).sitter_languages?.map((l: any) => l.language) || [];
@@ -250,9 +259,12 @@ export default function ProfilePage() {
         .from('sitter_profiles')
         .update({
           headline,
-          hourly_rate: hourlyRate,
+          base_hourly_rate_cents: hourlyRate * 100,
+          additional_child_rate_cents: (additionalChildRate || 0) * 100,
+          pricing_model: pricingModel,
           years_experience: yearsExperience,
           max_children: maxChildren,
+          minimum_notice_hours: minimumNoticeHours,
           gallery_urls: finalUrls,
           cover_url: coverUrl.trim() || 'https://images.unsplash.com/photo-1516627145497-ae6968895b74?w=800',
         })
@@ -893,8 +905,163 @@ export default function ProfilePage() {
                   disabled={!isEditingPro}
                   value={maxChildren}
                   onChange={(e) => setMaxChildren(Number(e.target.value))}
-                  className="w-full p-3.5 rounded-2xl border border-stone-200 dark:border-slate-700 text-xs bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary disabled:opacity-80"
+                  className="w-full p-3.5 rounded-2xl border border-stone-200 dark:border-slate-700 text-xs bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary disabled:opacity-80 font-bold"
                 />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Minimum Booking Notice Required</label>
+                <select 
+                  disabled={!isEditingPro}
+                  value={minimumNoticeHours} 
+                  onChange={(e) => setMinimumNoticeHours(Number(e.target.value))}
+                  className="w-full p-3.5 rounded-2xl border border-stone-200 dark:border-slate-700 text-xs bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary disabled:opacity-80 appearance-none font-bold"
+                >
+                  <option value={0}>Same day (no notice required)</option>
+                  <option value={2}>2 hours notice</option>
+                  <option value={6}>6 hours notice</option>
+                  <option value={12}>12 hours notice</option>
+                  <option value={24}>24 hours (1 day) notice</option>
+                  <option value={48}>48 hours (2 days) notice</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Sitter Multiple Children Pricing Config & Preview */}
+            <div className="space-y-4 border-t border-stone-100 dark:border-slate-800 pt-4">
+              <label className="block text-[10px] font-bold text-stone-400 uppercase">Multiple Children Pricing</label>
+              
+              {isEditingPro ? (
+                <div className="space-y-3">
+                  <p className="text-xs text-stone-400 font-semibold">Configure how you charge parents for bookings with multiple children.</p>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    {/* Flat */}
+                    <button
+                      type="button"
+                      onClick={() => setPricingModel('flat')}
+                      className={`p-3.5 border rounded-2xl text-left transition-all active-press flex items-start gap-2.5 w-full ${
+                        pricingModel === 'flat' ? 'border-primary bg-emerald-50/40 dark:bg-emerald-950/20' : 'border-stone-200 dark:border-slate-700 hover:bg-stone-50 dark:hover:bg-slate-800/50'
+                      }`}
+                    >
+                      <div className={`mt-0.5 h-3.5 w-3.5 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                        pricingModel === 'flat' ? 'border-primary text-primary' : 'border-stone-300 dark:border-slate-600'
+                      }`}>
+                        {pricingModel === 'flat' && <div className="h-1.5 w-1.5 rounded-full bg-primary" />}
+                      </div>
+                      <div>
+                        <strong className="block text-xs text-heading dark:text-white">Flat hourly</strong>
+                        <span className="text-[10px] text-stone-400">Same rate for any count.</span>
+                      </div>
+                    </button>
+
+                    {/* Additional Child */}
+                    <button
+                      type="button"
+                      onClick={() => setPricingModel('additional_child')}
+                      className={`p-3.5 border rounded-2xl text-left transition-all active-press flex items-start gap-2.5 w-full ${
+                        pricingModel === 'additional_child' ? 'border-primary bg-emerald-50/40 dark:bg-emerald-950/20' : 'border-stone-200 dark:border-slate-700 hover:bg-stone-50 dark:hover:bg-slate-800/50'
+                      }`}
+                    >
+                      <div className={`mt-0.5 h-3.5 w-3.5 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                        pricingModel === 'additional_child' ? 'border-primary text-primary' : 'border-stone-300 dark:border-slate-600'
+                      }`}>
+                        {pricingModel === 'additional_child' && <div className="h-1.5 w-1.5 rounded-full bg-primary" />}
+                      </div>
+                      <div>
+                        <strong className="block text-xs text-heading dark:text-white">Add-child</strong>
+                        <span className="text-[10px] text-stone-400">Extra fee per extra child.</span>
+                      </div>
+                    </button>
+
+                    {/* Per Child */}
+                    <button
+                      type="button"
+                      onClick={() => setPricingModel('per_child')}
+                      className={`p-3.5 border rounded-2xl text-left transition-all active-press flex items-start gap-2.5 w-full ${
+                        pricingModel === 'per_child' ? 'border-primary bg-emerald-50/40 dark:bg-emerald-950/20' : 'border-stone-200 dark:border-slate-700 hover:bg-stone-50 dark:hover:bg-slate-800/50'
+                      }`}
+                    >
+                      <div className={`mt-0.5 h-3.5 w-3.5 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                        pricingModel === 'per_child' ? 'border-primary text-primary' : 'border-stone-300 dark:border-slate-600'
+                      }`}>
+                        {pricingModel === 'per_child' && <div className="h-1.5 w-1.5 rounded-full bg-primary" />}
+                      </div>
+                      <div>
+                        <strong className="block text-xs text-heading dark:text-white">Per-child</strong>
+                        <span className="text-[10px] text-stone-400">Multiply rate by kids count.</span>
+                      </div>
+                    </button>
+                  </div>
+
+                  {pricingModel === 'additional_child' && (
+                    <div className="p-4 bg-stone-50 dark:bg-slate-800/50 border border-stone-155 dark:border-slate-700 rounded-2xl space-y-2 animate-fadeIn">
+                      <label className="block text-[10px] font-bold text-stone-400 uppercase">
+                        Rate per Additional Child ($/hr)
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={30}
+                        step={0.5}
+                        value={additionalChildRate}
+                        onChange={(e) => setAdditionalChildRate(Number(e.target.value))}
+                        className="p-3 bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-700 text-xs rounded-xl outline-none focus:border-primary w-full max-w-[200px] dark:text-white"
+                        placeholder="e.g. 5"
+                      />
+                      <p className="text-[9px] text-stone-400 font-semibold">Each additional child adds ${additionalChildRate}/hr to your base rate of ${hourlyRate}/hr.</p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="p-4 bg-stone-50/50 dark:bg-slate-800/30 border border-stone-155 dark:border-slate-800 rounded-2xl text-xs space-y-1.5 font-semibold text-stone-600 dark:text-stone-300">
+                  <div className="flex justify-between items-center">
+                    <span className="text-stone-450">Pricing Model:</span>
+                    <span className="font-bold text-heading dark:text-white capitalize">
+                      {pricingModel === 'flat' ? 'Flat Hourly Rate' : pricingModel === 'additional_child' ? 'Additional Child Pricing' : 'Per Child Pricing'}
+                    </span>
+                  </div>
+                  {pricingModel === 'additional_child' && (
+                    <div className="flex justify-between items-center text-stone-400 text-[11px] font-semibold">
+                      <span>Additional Child Rate:</span>
+                      <span className="font-bold text-primary">${additionalChildRate}/hr</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Live Preview grid */}
+              <div className="bg-stone-50 dark:bg-slate-800/40 p-4 border border-stone-200 dark:border-slate-800 rounded-2xl space-y-2 font-semibold">
+                <span className="block text-[10px] font-bold text-stone-450 uppercase tracking-wide">Live Preview for Parents</span>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-semibold">
+                  {[1, 2, 3, 4].map(numKids => {
+                    let previewRate = hourlyRate;
+                    if (pricingModel === 'additional_child') {
+                      previewRate = hourlyRate + Math.max(0, numKids - 1) * (additionalChildRate || 0);
+                    } else if (pricingModel === 'per_child') {
+                      previewRate = hourlyRate * numKids;
+                    }
+                    const isExceedingCap = numKids > maxChildren;
+                    return (
+                      <div
+                        key={numKids}
+                        className={`p-3 border rounded-xl flex flex-col justify-between ${
+                          isExceedingCap 
+                            ? 'bg-red-50/50 dark:bg-red-950/20 border-red-100 dark:border-red-900 opacity-60 text-red-700 dark:text-red-300' 
+                            : 'bg-white dark:bg-slate-900 border-stone-155 dark:border-slate-700 text-stone-700 dark:text-slate-200'
+                        }`}
+                      >
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-[10px] text-stone-400 font-semibold">{numKids} Kid{numKids > 1 ? 's' : ''}</span>
+                          {isExceedingCap && <span className="text-[8px] bg-red-105 dark:bg-red-900 px-1 py-0.5 rounded font-black text-red-800 dark:text-red-100">Cap</span>}
+                        </div>
+                        <span className="font-display font-black text-sm text-heading dark:text-white">${previewRate}/hr</span>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 

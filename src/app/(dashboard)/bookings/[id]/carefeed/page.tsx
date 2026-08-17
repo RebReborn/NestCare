@@ -18,7 +18,8 @@ import {
   Play, 
   Square,
   Award,
-  ChevronLeft
+  ChevronLeft,
+  X
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
@@ -34,6 +35,8 @@ export default function CarefeedPage() {
   const [booking, setBooking] = useState<any | null>(null);
   const [children, setChildren] = useState<any[]>([]);
   const [isSitter, setIsSitter] = useState(false);
+  const [emergencyContacts, setEmergencyContacts] = useState<any[]>([]);
+  const [showEmergencyModal, setShowEmergencyModal] = useState(false);
 
   // Care Logs state
   const [logs, setLogs] = useState<any[]>([]);
@@ -98,7 +101,7 @@ export default function CarefeedPage() {
         // Fetch booking children details
         const { data: kidsData } = await supabase
           .from('booking_children')
-          .select('child:children(id, first_name)')
+          .select('child:children(id, first_name, date_of_birth, age_group, special_instructions, allergies, medical_notes, emergency_information, medications, school, authorized_pickup)')
           .eq('booking_id', bookingId);
 
         const mappedKids = kidsData?.map((k: any) => k.child).filter(Boolean) || [];
@@ -106,6 +109,13 @@ export default function CarefeedPage() {
         if (mappedKids.length > 0) {
           setSelectedChildId(mappedKids[0].id);
         }
+
+        // Fetch parent's emergency contacts
+        const { data: contacts } = await supabase
+          .from('emergency_contacts')
+          .select('*')
+          .eq('parent_id', bData.parent_id);
+        setEmergencyContacts(contacts || []);
 
         // Fetch initial logs
         const { data: logsData } = await supabase
@@ -311,11 +321,22 @@ export default function CarefeedPage() {
             Sitter: <span className="font-bold text-stone-600">{booking?.sitter?.display_name}</span>
           </p>
         </div>
-        {booking?.status === 'completed' && (
-          <span className="bg-emerald-50 text-emerald-700 px-3.5 py-1.5 rounded-full font-bold text-xs border border-emerald-100 uppercase tracking-wider flex items-center gap-1.5">
-            <Award className="h-4 w-4" /> Summary Ready
-          </span>
-        )}
+        <div className="flex gap-2">
+          {/* Emergency button visible during active bookings */}
+          {['accepted', 'in_progress'].includes(booking?.status) && (
+            <button
+              onClick={() => setShowEmergencyModal(true)}
+              className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-2xl active-press flex items-center gap-1.5 text-xs font-black transition-all animate-pulse shadow-sm"
+            >
+              <AlertCircle className="h-4 w-4" /> Emergency Contacts
+            </button>
+          )}
+          {booking?.status === 'completed' && (
+            <span className="bg-emerald-50 text-emerald-700 px-3.5 py-1.5 rounded-full font-bold text-xs border border-emerald-100 uppercase tracking-wider flex items-center gap-1.5">
+              <Award className="h-4 w-4" /> Summary Ready
+            </span>
+          )}
+        </div>
       </div>
 
       {/* COMPLETED SESSION SUMMARY SUMMARY */}
@@ -656,13 +677,150 @@ export default function CarefeedPage() {
                         />
                       </div>
                     )}
-                  </div>
+                   </div>
                 </div>
               );
             })}
           </div>
         )}
       </div>
+
+      {/* Emergency Info Modal Overlay */}
+      {showEmergencyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fade-in">
+          <div className="bg-white border border-stone-200 rounded-3xl p-6 shadow-xl w-full max-w-lg space-y-5 max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+              <div className="flex items-center gap-2">
+                <span className="p-2.5 bg-red-50 text-red-600 rounded-2xl">🚨</span>
+                <div>
+                  <h3 className="font-display font-black text-sm text-heading text-red-700 uppercase tracking-wider">Critical Emergency Details</h3>
+                  <p className="text-[10px] text-stone-400 font-semibold">Sensitive caregiver dashboard. Restricted to current active session.</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowEmergencyModal(false)}
+                className="p-1.5 hover:bg-stone-100 rounded-lg transition-colors"
+              >
+                <X className="h-5 w-5 text-stone-400" />
+              </button>
+            </div>
+
+            {/* Child Profiles medical information */}
+            <div className="space-y-3">
+              <h4 className="font-bold text-xs text-heading uppercase tracking-wide flex items-center gap-1.5 text-stone-800 font-semibold">
+                👶 Registered Children Health Profiles
+              </h4>
+              <div className="space-y-2">
+                {children.map((c) => (
+                  <div key={c.id} className="p-4 bg-stone-50 rounded-2xl border border-stone-150 space-y-2 text-xs">
+                    <div className="flex items-center justify-between border-b border-stone-200 pb-1.5">
+                      <strong className="text-sm font-black text-heading block">👶 {c.first_name}</strong>
+                      <span className="text-[9px] bg-stone-200 text-stone-700 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider font-semibold">
+                        {c.age_group}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <span className="text-[10px] font-bold text-stone-400 uppercase block">Allergies</span>
+                        <span className={`font-semibold text-xs ${c.allergies ? 'text-red-700 font-bold' : 'text-stone-600'}`}>
+                          {c.allergies || 'No known allergies'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-stone-400 uppercase block">Medications</span>
+                        <span className={`font-semibold text-xs ${c.medications ? 'text-amber-700 font-bold' : 'text-stone-600'}`}>
+                          {c.medications || 'No current medications'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 pt-1">
+                      <div>
+                        <span className="text-[10px] font-bold text-stone-400 uppercase block">School / Daycare</span>
+                        <span className="font-semibold text-xs text-stone-600">
+                          {c.school || 'Not specified'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-stone-400 uppercase block">Pickup Authorization</span>
+                        <span className={`text-xs font-bold ${c.authorized_pickup ? 'text-emerald-700' : 'text-red-700'}`}>
+                          {c.authorized_pickup ? '✓ Sitter is Authorized for Pickup' : '✗ NOT Authorized for Pickup'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {c.special_instructions && (
+                      <div className="pt-1.5 border-t border-stone-200/50">
+                        <span className="text-[10px] font-bold text-stone-400 uppercase block">Care Instructions & Emergency Notes</span>
+                        <p className="text-stone-600 mt-0.5 leading-relaxed bg-white p-2.5 rounded-xl border border-stone-150 font-semibold">{c.special_instructions}</p>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Parent Emergency Contacts */}
+            <div className="space-y-3 pt-2 border-t border-stone-100">
+              <h4 className="font-bold text-xs text-heading uppercase tracking-wide flex items-center gap-1.5 text-stone-800 font-semibold">
+                📞 Parent Emergency Contacts
+              </h4>
+              
+              {emergencyContacts.length === 0 ? (
+                <p className="text-xs text-stone-400 italic bg-stone-50 p-4 rounded-2xl border text-center font-medium">
+                  No emergency contacts configured on parent profile.
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  {emergencyContacts.map((contact) => (
+                    <div 
+                      key={contact.id} 
+                      className="p-3.5 bg-stone-50 border border-stone-150 rounded-2xl space-y-1"
+                    >
+                      <div className="flex items-center justify-between pb-1 border-b border-stone-200">
+                        <strong className="font-black text-heading text-xs block">
+                          👤 {contact.name}
+                        </strong>
+                        <span className={`text-[8px] px-2 py-0.5 rounded-full font-black uppercase tracking-wider ${
+                          contact.contact_type === 'primary' 
+                            ? 'bg-red-100 text-red-755' 
+                            : contact.contact_type === 'secondary'
+                              ? 'bg-amber-100 text-amber-700'
+                              : 'bg-blue-100 text-blue-700'
+                        }`}>
+                          {contact.contact_type}
+                        </span>
+                      </div>
+                      <div className="pt-1">
+                        <span className="text-[9px] font-bold text-stone-400 uppercase block">Phone Number</span>
+                        <a 
+                          href={`tel:${contact.phone}`} 
+                          className="font-bold text-xs text-primary hover:underline"
+                        >
+                          📞 {contact.phone}
+                        </a>
+                      </div>
+                      {contact.relationship && (
+                        <div>
+                          <span className="text-[9px] font-bold text-stone-400 uppercase block">Relationship</span>
+                          <span className="font-semibold text-stone-600">{contact.relationship}</span>
+                        </div>
+                      )}
+                      {contact.notes && (
+                        <div>
+                          <span className="text-[9px] font-bold text-stone-400 uppercase block">Notes / Clinic</span>
+                          <span className="font-semibold text-stone-600">{contact.notes}</span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

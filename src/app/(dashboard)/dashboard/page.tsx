@@ -113,7 +113,7 @@ async function ParentDashboardView({ parentId, parentName }: { parentId: string,
       avatar_url,
       sitter_profiles (
         headline,
-        hourly_rate,
+        base_hourly_rate_cents,
         years_experience
       )
     `)
@@ -128,7 +128,7 @@ async function ParentDashboardView({ parentId, parentName }: { parentId: string,
       sitter:sitter_profiles (
         id,
         headline,
-        hourly_rate,
+        base_hourly_rate_cents,
         profile:profiles (
           display_name,
           avatar_url
@@ -146,7 +146,7 @@ async function ParentDashboardView({ parentId, parentName }: { parentId: string,
       display_name: profile?.display_name,
       avatar_url: profile?.avatar_url,
       headline: sp?.headline,
-      hourly_rate: sp?.hourly_rate,
+      hourly_rate: sp?.base_hourly_rate_cents ? Math.round(Number(sp.base_hourly_rate_cents) / 100) : 20,
     };
   }).filter(f => f.id);
 
@@ -312,7 +312,7 @@ async function ParentDashboardView({ parentId, parentName }: { parentId: string,
                   </div>
                 </div>
                 <div className="text-right">
-                  <span className="font-display text-sm font-extrabold text-heading block">${profileDetails?.hourly_rate}/hr</span>
+                  <span className="font-display text-sm font-extrabold text-heading block">${profileDetails?.base_hourly_rate_cents ? Math.round(Number(profileDetails.base_hourly_rate_cents) / 100) : 20}/hr</span>
                   <span className="text-[10px] text-stone-400 font-medium">{profileDetails?.years_experience} yrs exp</span>
                 </div>
               </Link>
