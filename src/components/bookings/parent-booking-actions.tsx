@@ -12,9 +12,7 @@ export function ParentBookingActions({ bookingId }: { bookingId: string }) {
   const supabase = createClient();
   const [cancelling, setCancelling] = useState(false);
 
-  const handleCancel = async () => {
-    if (!confirm('Are you sure you want to cancel this booking request?')) return;
-
+  const executeCancel = async () => {
     try {
       setCancelling(true);
       const { error } = await supabase
@@ -30,6 +28,20 @@ export function ParentBookingActions({ bookingId }: { bookingId: string }) {
     } finally {
       setCancelling(false);
     }
+  };
+
+  const handleCancel = () => {
+    toast.warning('Cancel Booking Request?', {
+      description: 'Are you sure you want to cancel this booking request? This action cannot be undone.',
+      action: {
+        label: 'Yes, Cancel',
+        onClick: () => executeCancel(),
+      },
+      cancel: {
+        label: 'Keep Booking',
+      },
+      duration: 8000,
+    });
   };
 
   return (
