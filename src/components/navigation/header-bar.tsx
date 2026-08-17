@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { NotificationBell } from '@/components/notifications/notification-bell';
-import { ThemeToggle } from '@/components/theme-toggle';
 
 export function HeaderBar() {
   const [isVisible, setIsVisible] = useState(true);
@@ -50,7 +49,6 @@ export function HeaderBar() {
       </Link>
       <div className="hidden md:block" />
       <div className="flex items-center gap-2">
-        <ThemeToggle />
         <NotificationBell />
       </div>
     </header>
