@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 import { BottomNav } from '@/components/navigation/bottom-nav';
 import { SidebarNav } from '@/components/navigation/sidebar-nav';
 import { HeaderBar } from '@/components/navigation/header-bar';
