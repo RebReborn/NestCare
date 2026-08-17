@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { toast } from 'sonner';
 import { ThemeSettingsControl } from '@/components/theme-toggle';
 import { PaymentMethodsModal } from '@/components/payments/payment-methods-modal';
-import { Settings, LogOut, Loader2, Save, Baby, Plus, Trash2, Edit2, ShieldAlert, CheckCircle, Bell, FileText, User, CreditCard } from 'lucide-react';
+import { Settings, LogOut, Loader2, Save, Baby, Plus, Trash2, Edit2, ShieldAlert, CheckCircle, Bell, FileText, User, CreditCard, Compass } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
 export default function SettingsPage() {
@@ -43,6 +43,20 @@ export default function SettingsPage() {
   const [deactivating, setDeactivating] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [stripeConnected, setStripeConnected] = useState(false);
+  const [useFloatingNav, setUseFloatingNav] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setUseFloatingNav(localStorage.getItem('use_floating_nav') === 'true');
+    }
+  }, []);
+
+  const handleToggleFloatingNav = (checked: boolean) => {
+    setUseFloatingNav(checked);
+    localStorage.setItem('use_floating_nav', checked ? 'true' : 'false');
+    window.dispatchEvent(new Event('floating_nav_changed'));
+    toast.success(checked ? 'Floating navigation menu activated!' : 'Traditional bottom bar activated!');
+  };
 
   useEffect(() => {
     async function loadSettings() {
@@ -315,6 +329,44 @@ export default function SettingsPage() {
               placeholder="e.g. (555) 019-9234"
               className="w-full p-3.5 rounded-2xl border border-stone-200 text-xs bg-stone-50 outline-none focus:border-primary"
             />
+          </div>
+        </div>
+
+        {/* Mobile Navigation Style Card */}
+        <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
+          <h3 className="font-display text-sm font-bold text-heading dark:text-white flex items-center gap-2">
+            <Compass className="h-5 w-5 text-primary" /> Navigation Style (Mobile)
+          </h3>
+          <p className="text-xs text-stone-500 dark:text-slate-400">
+            Choose how you navigate the application on mobile devices.
+          </p>
+
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => handleToggleFloatingNav(false)}
+              className={`p-4 rounded-2xl border text-left transition-all active-press cursor-pointer ${
+                !useFloatingNav
+                  ? 'border-primary bg-emerald-50/40 dark:bg-emerald-950/20 ring-2 ring-primary/20 font-bold'
+                  : 'border-stone-200 dark:border-slate-800 hover:bg-stone-50 dark:hover:bg-slate-800/50'
+              }`}
+            >
+              <strong className="block text-xs font-bold text-heading dark:text-white mb-0.5">Bottom Nav Bar</strong>
+              <span className="text-[10px] text-stone-400 dark:text-slate-400 block leading-tight">Traditional fixed layout at the bottom of the screen.</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleToggleFloatingNav(true)}
+              className={`p-4 rounded-2xl border text-left transition-all active-press cursor-pointer ${
+                useFloatingNav
+                  ? 'border-primary bg-emerald-50/40 dark:bg-emerald-950/20 ring-2 ring-primary/20 font-bold'
+                  : 'border-stone-200 dark:border-slate-800 hover:bg-stone-50 dark:hover:bg-slate-800/50'
+              }`}
+            >
+              <strong className="block text-xs font-bold text-heading dark:text-white mb-0.5">Floating Menu (FAB)</strong>
+              <span className="text-[10px] text-stone-400 dark:text-slate-400 block leading-tight">Modern, expandable floating compass navigation menu.</span>
+            </button>
           </div>
         </div>
 
