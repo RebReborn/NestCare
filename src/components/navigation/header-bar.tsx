@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { User } from 'lucide-react';
+import { usePathname } from 'next/navigation';
+import { User, Settings } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { NotificationBell } from '@/components/notifications/notification-bell';
 
@@ -12,6 +13,9 @@ export function HeaderBar() {
   const [lastScrollY, setLastScrollY] = useState(0);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const supabase = createClient();
+  const pathname = usePathname();
+
+  const isProfilePage = pathname === '/profile';
 
   useEffect(() => {
     async function getProfile() {
@@ -76,19 +80,29 @@ export function HeaderBar() {
       <div className="hidden md:block" />
       <div className="flex items-center gap-3">
         <NotificationBell />
-        <Link href="/profile" className="flex items-center hover-scale active-press">
-          {avatarUrl ? (
-            <img 
-              src={avatarUrl} 
-              alt="Profile" 
-              className="w-8 h-8 rounded-full object-cover border border-stone-200 dark:border-slate-800 shadow-sm"
-            />
-          ) : (
-            <div className="w-8 h-8 rounded-full bg-stone-100 dark:bg-slate-800 flex items-center justify-center border border-stone-200 dark:border-slate-700 text-stone-500 dark:text-slate-400">
-              <User className="h-4 w-4" />
-            </div>
-          )}
-        </Link>
+        {isProfilePage ? (
+          <Link 
+            href="/settings" 
+            className="flex items-center justify-center h-8 w-8 rounded-full bg-stone-100 hover:bg-stone-200/70 dark:bg-slate-800 dark:hover:bg-slate-700/70 text-stone-600 dark:text-slate-300 hover-scale active-press transition-colors"
+            title="Settings"
+          >
+            <Settings className="h-4.5 w-4.5" strokeWidth={2} />
+          </Link>
+        ) : (
+          <Link href="/profile" className="flex items-center hover-scale active-press" title="Profile">
+            {avatarUrl ? (
+              <img 
+                src={avatarUrl} 
+                alt="Profile" 
+                className="w-8 h-8 rounded-full object-cover border border-stone-200 dark:border-slate-800 shadow-sm"
+              />
+            ) : (
+              <div className="w-8 h-8 rounded-full bg-stone-100 dark:bg-slate-800 flex items-center justify-center border border-stone-200 dark:border-slate-700 text-stone-500 dark:text-slate-400">
+                <User className="h-4 w-4" />
+              </div>
+            )}
+          </Link>
+        )}
       </div>
     </header>
   );
