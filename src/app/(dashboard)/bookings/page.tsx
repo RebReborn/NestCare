@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import Link from 'next/link';
-import { Calendar, Clock, User, ShieldCheck, Check, DollarSign, AlertCircle, Loader2 } from 'lucide-react';
+import { Calendar, Clock, User, ShieldCheck, Check, DollarSign, AlertCircle, Loader2, Star } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { BookingActions } from '@/components/bookings/booking-actions';
 import { ParentBookingActions } from '@/components/bookings/parent-booking-actions';

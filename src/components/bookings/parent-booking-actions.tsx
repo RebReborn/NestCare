@@ -39,6 +39,7 @@ export function ParentBookingActions({ bookingId }: { bookingId: string }) {
       },
       cancel: {
         label: 'Keep Booking',
+        onClick: () => {},
       },
       duration: 8000,
     });

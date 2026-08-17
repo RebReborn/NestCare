@@ -19,10 +19,12 @@ export function ReviewModal({ bookingId, sitterId, sitterName, onClose, onSucces
   const [hoverRating, setHoverRating] = useState<number | null>(null);
   const [comment, setComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
+    setError(null);
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -44,9 +46,13 @@ export function ReviewModal({ bookingId, sitterId, sitterName, onClose, onSucces
       onSuccess();
     } catch (err: any) {
       if (err.code === '23505') {
-        toast.error('You have already submitted a review for this booking.');
+        const msg = 'You have already submitted a review for this booking.';
+        setError(msg);
+        toast.error(msg);
       } else {
-        toast.error(err.message || 'Failed to submit review. Try again.');
+        const msg = err.message || 'Failed to submit review. Try again.';
+        setError(msg);
+        toast.error(msg);
       }
     } finally {
       setSubmitting(false);
