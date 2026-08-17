@@ -2,12 +2,37 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { User } from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
 import { NotificationBell } from '@/components/notifications/notification-bell';
 
 export function HeaderBar() {
   const [isVisible, setIsVisible] = useState(true);
   const [isShrunk, setIsShrunk] = useState(false);
   const [lastScrollY, setLastScrollY] = useState(0);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const supabase = createClient();
+
+  useEffect(() => {
+    async function getProfile() {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('avatar_url')
+            .eq('id', user.id)
+            .single();
+          if (profile?.avatar_url) {
+            setAvatarUrl(profile.avatar_url);
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching profile avatar in header:', err);
+      }
+    }
+    getProfile();
+  }, []);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -48,8 +73,21 @@ export function HeaderBar() {
         NestCare
       </Link>
       <div className="hidden md:block" />
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3">
         <NotificationBell />
+        <Link href="/profile" className="flex items-center hover-scale active-press">
+          {avatarUrl ? (
+            <img 
+              src={avatarUrl} 
+              alt="Profile" 
+              className="w-8 h-8 rounded-full object-cover border border-stone-200 dark:border-slate-800 shadow-sm"
+            />
+          ) : (
+            <div className="w-8 h-8 rounded-full bg-stone-100 dark:bg-slate-800 flex items-center justify-center border border-stone-200 dark:border-slate-700 text-stone-500 dark:text-slate-400">
+              <User className="h-4 w-4" />
+            </div>
+          )}
+        </Link>
       </div>
     </header>
   );
