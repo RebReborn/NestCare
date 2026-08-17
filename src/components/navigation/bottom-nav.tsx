@@ -106,9 +106,9 @@ export function BottomNav() {
       />
 
       {/* Floating Menu Container */}
-      <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3.5">
+      <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end gap-2.5">
         {/* Navigation Items (Staggered Vertical Stack) */}
-        <div className={`flex flex-col items-end gap-3.5 transition-all duration-300 ease-out ${
+        <div className={`flex flex-col items-end gap-2.5 transition-all duration-300 ease-out ${
           isOpen ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 translate-y-10 pointer-events-none'
         }`}>
           {navItems.map((item, index) => {
@@ -119,13 +119,13 @@ export function BottomNav() {
                 key={item.href}
                 href={item.href}
                 onClick={() => setIsOpen(false)}
-                className="flex items-center gap-3.5 group"
+                className="flex items-center gap-2.5 group"
                 style={{
                   transitionDelay: isOpen ? `${index * 40}ms` : '0ms'
                 }}
               >
                 {/* Tooltip Capsule with glass effect */}
-                <span className={`px-3 py-1.5 text-[10px] font-black tracking-wider uppercase rounded-xl shadow-md border backdrop-blur-xs transition-all duration-200 ${
+                <span className={`px-2.5 py-1 text-[9px] font-black tracking-wider uppercase rounded-lg shadow-md border backdrop-blur-xs transition-all duration-200 ${
                   isActive 
                     ? 'bg-primary text-white border-emerald-600' 
                     : 'bg-white/95 dark:bg-slate-900/95 text-stone-700 dark:text-slate-200 border-stone-200/80 dark:border-slate-800'
@@ -134,15 +134,15 @@ export function BottomNav() {
                 </span>
 
                 {/* Circular Icon Button with matching theme color */}
-                <div className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg border relative transition-all duration-200 active-press hover-scale ${
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center shadow-lg border relative transition-all duration-200 active-press hover-scale ${
                   isActive
                     ? 'bg-primary text-white border-emerald-600 shadow-[0_4px_12px_rgba(16,185,129,0.3)]'
                     : `bg-white dark:bg-slate-900 border-stone-200/80 dark:border-slate-800 ${item.color}`
                 }`}>
-                  <Icon className="h-5 w-5" strokeWidth={isActive ? 2.5 : 2} />
+                  <Icon className="h-4.5 w-4.5" strokeWidth={isActive ? 2.5 : 2} />
                   
                   {item.badge !== undefined && item.badge > 0 && (
-                    <span className="absolute -top-1 -right-1 bg-red-500 text-[8px] font-black text-white h-4.5 w-4.5 rounded-full flex items-center justify-center border-2 border-white dark:border-slate-900">
+                    <span className="absolute -top-1 -right-1 bg-red-500 text-[8px] font-black text-white h-4 w-4 rounded-full flex items-center justify-center border border-white dark:border-slate-900">
                       {item.badge}
                     </span>
                   )}
@@ -155,14 +155,14 @@ export function BottomNav() {
         {/* Primary Toggle FAB Button */}
         <button
           onClick={() => setIsOpen(!isOpen)}
-          className={`w-14 h-14 rounded-full flex items-center justify-center text-white shadow-xl bg-gradient-to-tr from-emerald-600 to-teal-500 hover:from-emerald-700 hover:to-teal-600 transition-all duration-300 ease-out active-press hover-scale ${
+          className={`w-12 h-12 rounded-full flex items-center justify-center text-white shadow-xl bg-gradient-to-tr from-emerald-600 to-teal-500 hover:from-emerald-700 hover:to-teal-600 transition-all duration-300 ease-out active-press hover-scale ${
             isOpen ? 'rotate-90 ring-4 ring-emerald-500/20' : 'shadow-[0_8px_30px_rgba(16,185,129,0.3)] animate-pulse'
           }`}
         >
           {isOpen ? (
-            <X className="h-6 w-6" strokeWidth={2.5} />
+            <X className="h-5 w-5" strokeWidth={2.5} />
           ) : (
-            <Compass className="h-6 w-6" strokeWidth={2} />
+            <Compass className="h-5 w-5" strokeWidth={2} />
           )}
         </button>
       </div>
