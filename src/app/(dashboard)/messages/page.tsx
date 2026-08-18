@@ -907,27 +907,30 @@ export default function MessagesPage() {
               </div>
 
               {/* Header Action Buttons */}
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                {/* Video Call Button */}
                 <button
                   onClick={() => setActiveCall({ callMode: 'video' })}
-                  className="p-2.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 hover:bg-emerald-100 active-press transition-colors flex items-center gap-1.5 font-bold text-xs shadow-2xs"
+                  className="p-2 sm:p-2.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 hover:bg-emerald-100 active-press transition-colors flex items-center gap-1.5 font-bold text-xs shadow-2xs"
                   title="Start Video Call"
                 >
-                  <Video className="h-4 w-4 text-primary" />
+                  <Video className="h-4 w-4 text-primary shrink-0" />
                   <span className="hidden sm:inline">Video Call</span>
                 </button>
 
+                {/* Audio Call Button (Visible on tablet & desktop, integrated into menu on mobile) */}
                 <button
                   onClick={() => setActiveCall({ callMode: 'audio' })}
-                  className="p-2.5 rounded-2xl border border-stone-200 hover:bg-stone-50 text-stone-600 active-press transition-colors"
+                  className="hidden sm:flex p-2.5 rounded-2xl border border-stone-200 hover:bg-stone-50 text-stone-600 active-press transition-colors items-center gap-1.5 font-bold text-xs"
                   title="Start Audio Call"
                 >
                   <Phone className="h-4 w-4" />
                 </button>
 
+                {/* Emergency Safety Button (Visible on desktop, integrated into menu on mobile) */}
                 <button
                   onClick={() => setShowEmergencyModal(true)}
-                  className="p-2.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 hover:bg-rose-100 active-press transition-colors"
+                  className="hidden md:flex p-2.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 hover:bg-rose-100 active-press transition-colors items-center gap-1.5 font-bold text-xs"
                   title="Safety & Emergency"
                 >
                   <AlertTriangle className="h-4 w-4" />
@@ -937,44 +940,64 @@ export default function MessagesPage() {
                 <div className="relative" ref={menuRef}>
                   <button
                     onClick={() => setShowMenu(v => !v)}
-                    className="p-2.5 rounded-2xl border border-stone-200 hover:bg-stone-50 text-stone-600 active-press transition-colors"
+                    className="p-2 sm:p-2.5 rounded-2xl border border-stone-200 hover:bg-stone-50 text-stone-600 active-press transition-colors"
                   >
                     <MoreVertical className="h-4 w-4" />
                   </button>
 
                   {showMenu && (
-                    <div className="absolute right-0 top-12 z-30 bg-white border border-stone-200 rounded-2xl shadow-xl py-1.5 w-52 animate-fade-in">
-                      {activeConv.booking_id && (
-                        <Link
-                          href="/bookings"
-                          className="w-full px-4 py-2.5 text-xs font-bold text-stone-700 hover:bg-stone-50 flex items-center gap-2"
-                        >
-                          <ExternalLink className="h-3.5 w-3.5 text-primary" /> View Booking Details
-                        </Link>
-                      )}
-
-                      <button
-                        onClick={() => { setShowMenu(false); setShowReportModal(true); }}
-                        className="w-full px-4 py-2.5 text-xs font-bold text-amber-600 hover:bg-amber-50 flex items-center gap-2 text-left"
-                      >
-                        <Flag className="h-3.5 w-3.5" /> Report User / Chat
-                      </button>
-
-                      {isBlockedByMe ? (
+                    <div className="absolute right-0 top-12 z-30 bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-2xl shadow-xl py-2 w-60 animate-fade-in divide-y divide-stone-100 dark:divide-slate-800">
+                      
+                      {/* Mobile-Only Action Items */}
+                      <div className="sm:hidden py-1">
                         <button
-                          onClick={handleUnblock}
-                          className="w-full px-4 py-2.5 text-xs font-bold text-emerald-600 hover:bg-emerald-50 flex items-center gap-2 text-left"
+                          onClick={() => { setShowMenu(false); setActiveCall({ callMode: 'audio' }); }}
+                          className="w-full px-4 py-2.5 text-xs font-bold text-stone-700 dark:text-slate-200 hover:bg-stone-50 dark:hover:bg-slate-800 flex items-center gap-2.5 text-left"
                         >
-                          <Ban className="h-3.5 w-3.5" /> Unblock User
+                          <Phone className="h-4 w-4 text-emerald-600" /> Start Audio Call
                         </button>
-                      ) : (
                         <button
-                          onClick={handleBlock}
-                          className="w-full px-4 py-2.5 text-xs font-bold text-rose-600 hover:bg-rose-50 flex items-center gap-2 text-left"
+                          onClick={() => { setShowMenu(false); setShowEmergencyModal(true); }}
+                          className="w-full px-4 py-2.5 text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-2.5 text-left"
                         >
-                          <Ban className="h-3.5 w-3.5" /> Block User
+                          <AlertTriangle className="h-4 w-4 text-rose-600" /> Safety & Emergency
                         </button>
-                      )}
+                      </div>
+
+                      {/* General Action Items */}
+                      <div className="py-1">
+                        {activeConv.booking_id && (
+                          <Link
+                            href="/bookings"
+                            className="w-full px-4 py-2.5 text-xs font-bold text-stone-700 dark:text-slate-200 hover:bg-stone-50 dark:hover:bg-slate-800 flex items-center gap-2.5"
+                          >
+                            <ExternalLink className="h-4 w-4 text-primary" /> View Booking Details
+                          </Link>
+                        )}
+
+                        <button
+                          onClick={() => { setShowMenu(false); setShowReportModal(true); }}
+                          className="w-full px-4 py-2.5 text-xs font-bold text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 flex items-center gap-2.5 text-left"
+                        >
+                          <Flag className="h-4 w-4" /> Report User / Chat
+                        </button>
+
+                        {isBlockedByMe ? (
+                          <button
+                            onClick={handleUnblock}
+                            className="w-full px-4 py-2.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 flex items-center gap-2.5 text-left"
+                          >
+                            <Ban className="h-4 w-4" /> Unblock User
+                          </button>
+                        ) : (
+                          <button
+                            onClick={handleBlock}
+                            className="w-full px-4 py-2.5 text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-2.5 text-left"
+                          >
+                            <Ban className="h-4 w-4" /> Block User
+                          </button>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
