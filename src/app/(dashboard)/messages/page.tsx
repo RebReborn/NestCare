@@ -1050,13 +1050,14 @@ export default function MessagesPage() {
                   }
 
                   if (msg.message_type === 'missed_call') {
+                    const cleanText = msg.content?.replace(/^[📹📞]\s*/, '') || 'Missed Video Call';
                     return (
                       <div key={msg.id || i} className={`flex ${isOwn ? 'justify-end' : 'justify-start'} my-2`}>
                         <div className="max-w-sm bg-rose-50/90 dark:bg-slate-800 border border-rose-200 dark:border-rose-900/50 p-4 rounded-3xl shadow-2xs space-y-2.5">
                           <div className="flex items-center justify-between gap-3">
                             <div className="flex items-center gap-2 text-rose-700 dark:text-rose-400 font-extrabold text-xs">
                               <PhoneOff className="h-4 w-4 shrink-0 text-rose-600" />
-                              <span>{msg.content || '📹 Missed Video Call'}</span>
+                              <span>{cleanText}</span>
                             </div>
                             <span className="text-[9px] text-stone-400 font-bold">
                               {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -1070,6 +1071,26 @@ export default function MessagesPage() {
                               <Video className="h-3.5 w-3.5" /> Call Back
                             </button>
                           )}
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  if (msg.message_type === 'call_summary') {
+                    const cleanText = msg.content?.replace(/^[📹📞]\s*/, '') || 'Video Call';
+                    const isAudio = msg.content?.includes('Audio') || msg.content?.includes('📞');
+                    return (
+                      <div key={msg.id || i} className={`flex ${isOwn ? 'justify-end' : 'justify-start'} my-2`}>
+                        <div className="max-w-sm bg-emerald-50/90 dark:bg-slate-800 border border-emerald-200 dark:border-emerald-900/50 p-4 rounded-3xl shadow-2xs space-y-1.5">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-300 font-extrabold text-xs">
+                              {isAudio ? <Phone className="h-4 w-4 shrink-0 text-emerald-600" /> : <Video className="h-4 w-4 shrink-0 text-emerald-600" />}
+                              <span>{cleanText}</span>
+                            </div>
+                            <span className="text-[9px] text-stone-400 font-bold">
+                              {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     );

@@ -321,7 +321,7 @@ export default function VideoCallModal({
         const mins = Math.floor(elapsedSecs / 60);
         const secs = elapsedSecs % 60;
         const durStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-        const callLabel = callMode === 'video' ? `📹 Video Call (${durStr})` : `📞 Audio Call (${durStr})`;
+        const callLabel = callMode === 'video' ? `Video Call (${durStr})` : `Audio Call (${durStr})`;
 
         supabase.from('messages').insert({
           conversation_id: conversationId,
@@ -334,7 +334,7 @@ export default function VideoCallModal({
           conversation_id: conversationId,
           sender_id: currentUser.id,
           message_type: 'missed_call',
-          content: callMode === 'video' ? '📹 Missed Video Call' : '📞 Missed Audio Call',
+          content: callMode === 'video' ? 'Missed Video Call' : 'Missed Audio Call',
         }).then(() => {});
       }
     }
