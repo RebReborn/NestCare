@@ -252,10 +252,19 @@ export default function VideoCallModal({
     };
   }, []);
 
+  const callStartTimeRef = useRef<number | null>(null);
+
   const startDurationTimer = () => {
+    if (!callStartTimeRef.current) {
+      callStartTimeRef.current = Date.now();
+    }
     if (durationTimerRef.current) return;
     durationTimerRef.current = setInterval(() => {
-      setCallDuration((prev) => prev + 1);
+      if (callStartTimeRef.current) {
+        setCallDuration(Math.floor((Date.now() - callStartTimeRef.current) / 1000));
+      } else {
+        setCallDuration((prev) => prev + 1);
+      }
     }, 1000);
   };
 
@@ -305,8 +314,12 @@ export default function VideoCallModal({
 
     if (!isIncoming) {
       if (hasConnectedRef.current || callState === 'connected') {
-        const mins = Math.floor(callDuration / 60);
-        const secs = callDuration % 60;
+        const elapsedSecs = callStartTimeRef.current
+          ? Math.max(1, Math.floor((Date.now() - callStartTimeRef.current) / 1000))
+          : callDuration;
+
+        const mins = Math.floor(elapsedSecs / 60);
+        const secs = elapsedSecs % 60;
         const durStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
         const callLabel = callMode === 'video' ? `📹 Video Call (${durStr})` : `📞 Audio Call (${durStr})`;
 

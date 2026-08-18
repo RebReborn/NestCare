@@ -13,7 +13,7 @@ export function useUnreadCounts() {
     let isMounted = true;
     let notifChannel: any = null;
     let msgChannel: any = null;
-    let participantChannel: any = null;
+    let readsChannel: any = null;
 
     async function fetchCounts(uId: string) {
       try {
@@ -26,26 +26,31 @@ export function useUnreadCounts() {
 
         if (isMounted) setUnreadNotifications(notifCount || 0);
 
-        // 2. Fetch unread messages
-        const { data: parts } = await supabase
-          .from('conversation_participants')
-          .select('conversation_id, last_read_at')
-          .eq('profile_id', uId);
+        // 2. Fetch unread messages via message_reads
+        const { data: convs } = await supabase
+          .from('conversations')
+          .select('id')
+          .or(`parent_id.eq.${uId},sitter_id.eq.${uId}`);
 
-        if (parts && parts.length > 0) {
-          const convIds = parts.map(p => p.conversation_id);
-          const { data: msgs } = await supabase
+        if (convs && convs.length > 0) {
+          const convIds = convs.map(c => c.id);
+          const { data: userMsgs } = await supabase
             .from('messages')
-            .select('conversation_id, created_at')
+            .select('id, conversation_id, created_at')
             .neq('sender_id', uId)
             .in('conversation_id', convIds);
 
-          if (msgs) {
-            const count = msgs.filter(msg => {
-              const cp = parts.find(p => p.conversation_id === msg.conversation_id);
-              return cp ? new Date(msg.created_at) > new Date(cp.last_read_at) : false;
-            }).length;
-            if (isMounted) setUnreadMessages(count);
+          if (userMsgs && userMsgs.length > 0) {
+            const msgIds = userMsgs.map(m => m.id);
+            const { data: readRecords } = await supabase
+              .from('message_reads')
+              .select('message_id')
+              .eq('user_id', uId)
+              .in('message_id', msgIds);
+
+            const readSet = new Set((readRecords || []).map(r => r.message_id));
+            const unreadCount = userMsgs.filter(m => !readSet.has(m.id)).length;
+            if (isMounted) setUnreadMessages(unreadCount);
           } else {
             if (isMounted) setUnreadMessages(0);
           }
@@ -65,7 +70,7 @@ export function useUnreadCounts() {
 
       const suffix = Math.random().toString(36).substring(2, 9);
 
-      // Subscribe to Notifications
+      // Subscribe to Notifications changes
       notifChannel = supabase
         .channel(`unread-notifs-${user.id}-${suffix}`)
         .on(
@@ -82,8 +87,7 @@ export function useUnreadCounts() {
         )
         .subscribe();
 
-      // Subscribe to messages in all user conversations
-      // Since filter doesn't support list-ins natively in supabase client side filter, we subscribe to all message inserts and check locally
+      // Subscribe to Message inserts
       msgChannel = supabase
         .channel(`unread-messages-${user.id}-${suffix}`)
         .on(
@@ -101,29 +105,22 @@ export function useUnreadCounts() {
         )
         .subscribe();
 
-      // Subscribe to conversation participant updates (last_read_at updates)
-      participantChannel = supabase
-        .channel(`unread-participants-${user.id}-${suffix}`)
+      // Subscribe to Message Reads inserts/deletes for instant badge updates
+      readsChannel = supabase
+        .channel(`unread-reads-${user.id}-${suffix}`)
         .on(
           'postgres_changes',
           {
-            event: 'UPDATE',
+            event: '*',
             schema: 'public',
-            table: 'conversation_participants',
-            filter: `profile_id=eq.${user.id}`
+            table: 'message_reads',
+            filter: `user_id=eq.${user.id}`
           },
           () => {
             if (isMounted) fetchCounts(user.id);
           }
         )
         .subscribe();
-
-      // Cleanup if unmounted while subscribing
-      if (!isMounted) {
-        if (notifChannel) supabase.removeChannel(notifChannel);
-        if (msgChannel) supabase.removeChannel(msgChannel);
-        if (participantChannel) supabase.removeChannel(participantChannel);
-      }
     }
 
     init();
@@ -132,9 +129,13 @@ export function useUnreadCounts() {
       isMounted = false;
       if (notifChannel) supabase.removeChannel(notifChannel);
       if (msgChannel) supabase.removeChannel(msgChannel);
-      if (participantChannel) supabase.removeChannel(participantChannel);
+      if (readsChannel) supabase.removeChannel(readsChannel);
     };
   }, []);
 
-  return { unreadNotifications, unreadMessages };
+  return {
+    unreadNotifications,
+    unreadMessages,
+    userId,
+  };
 }
