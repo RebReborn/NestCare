@@ -228,7 +228,8 @@ body {
 
 /* Mobile active chat full screen override rules */
 @media (max-width: 767px) {
-  body.mobile-chat-active nav {
+  body.mobile-chat-active nav,
+  body.mobile-chat-active header {
     display: none !important;
   }
   body.mobile-chat-active main {
@@ -236,10 +237,17 @@ body {
     margin: 0 !important;
     max-width: 100% !important;
     width: 100vw !important;
-    height: 100vh !important;
+    height: 100dvh !important;
     position: fixed !important;
     top: 0 !important;
     left: 0 !important;
     z-index: 100 !important;
+  }
+  body.mobile-chat-active main > div {
+    max-width: 100% !important;
+    width: 100% !important;
+    height: 100dvh !important;
+    padding: 0 !important;
+    margin: 0 !important;
   }
 }

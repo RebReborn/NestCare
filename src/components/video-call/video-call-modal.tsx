@@ -255,13 +255,29 @@ export default function VideoCallModal({
     hasConnectedRef.current = true;
     setCallState('connected');
     startDurationTimer();
-    if (channelRef.current) {
-      channelRef.current.send({
-        type: 'broadcast',
-        event: 'accept_call',
-        payload: { from: currentUser.id },
+
+    const sendAcceptSignal = () => {
+      if (channelRef.current) {
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'accept_call',
+          payload: { from: currentUser.id },
+        });
+      }
+      const partnerChannel = supabase.channel(`user_calls_${partnerId}`);
+      partnerChannel.subscribe((st) => {
+        if (st === 'SUBSCRIBED') {
+          partnerChannel.send({
+            type: 'broadcast',
+            event: 'accept_call',
+            payload: { from: currentUser.id },
+          });
+        }
       });
-    }
+    };
+
+    sendAcceptSignal();
+    setTimeout(sendAcceptSignal, 600);
   };
 
   const handleDeclineCall = () => {

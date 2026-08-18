@@ -771,7 +771,7 @@ export default function MessagesPage() {
   const isReadOnlyMode = activeConv?.booking?.status === 'completed' || activeConv?.booking?.status === 'cancelled';
 
   return (
-    <div className="h-[calc(100vh-6.5rem)] flex bg-white rounded-3xl border border-stone-200 shadow-sm overflow-hidden">
+    <div className="h-full md:h-[calc(100vh-6.5rem)] flex bg-white rounded-none md:rounded-3xl border-0 md:border border-stone-200 shadow-none md:shadow-sm overflow-hidden">
       
       {/* SIDEBAR: CONVERSATIONS LIST */}
       <div className={`w-full md:w-80 lg:w-96 border-r border-stone-200 flex flex-col bg-stone-50/50 ${activeConv ? 'hidden md:flex' : 'flex'}`}>
@@ -1254,7 +1254,7 @@ export default function MessagesPage() {
                 )}
               </div>
             ) : (
-              <form onSubmit={handleSendMessage} className="p-4 border-t border-stone-200 bg-white flex gap-2 items-center">
+              <form onSubmit={handleSendMessage} className="p-3 md:p-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-stone-200 bg-white flex gap-2 items-center shrink-0">
                 <input
                   type="file"
                   accept="image/*,application/pdf"
