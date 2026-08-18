@@ -227,6 +227,14 @@ export default function VideoCallModal({
                   });
                 }
               });
+
+              // Insert DB call notification fallback to guarantee reception across all pages
+              supabase.from('notifications').insert({
+                profile_id: partnerId,
+                type: 'incoming_call',
+                title: `Incoming ${callMode === 'video' ? 'Video' : 'Audio'} Call`,
+                content: JSON.stringify(invitePayload),
+              }).then(() => {});
             }
           });
       } catch (err: any) {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import VideoCallModal from '@/components/video-call/video-call-modal';
 
@@ -17,15 +17,13 @@ export function GlobalCallListener() {
     incomingSignal: any;
   } | null>(null);
 
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-
   useEffect(() => {
     async function initUserCallListener() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       setCurrentUser(user);
 
-      // Subscribe to persistent personal call signaling channel for incoming calls
+      // 1. Subscribe to Realtime WebSocket channel for incoming calls
       const callChannel = supabase.channel(`user_calls_${user.id}`);
 
       callChannel
@@ -42,14 +40,50 @@ export function GlobalCallListener() {
             });
           }
         })
-        .on('broadcast', { event: 'cancel_call' }, ({ payload }) => {
+        .on('broadcast', { event: 'cancel_call' }, () => {
           console.log('[Global Call Listener] Call cancelled by caller');
           setIncomingCall(null);
         })
         .subscribe();
 
+      // 2. Subscribe to Realtime Postgres DB Changes on notifications table as reliable fallback
+      const dbNotificationChannel = supabase
+        .channel(`db_call_notifications_${user.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'notifications',
+            filter: `profile_id=eq.${user.id}`,
+          },
+          (payload: any) => {
+            const newNotif = payload.new;
+            if (newNotif && newNotif.type === 'incoming_call') {
+              try {
+                const callData = JSON.parse(newNotif.content);
+                if (callData.callerId && callData.callerId !== user.id) {
+                  console.log('[Global Call Listener] Received DB incoming_call notification:', callData);
+                  setIncomingCall({
+                    conversationId: callData.conversationId,
+                    partnerId: callData.callerId,
+                    partnerName: callData.callerName || 'Care Partner',
+                    partnerAvatar: callData.callerAvatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100',
+                    callMode: callData.callMode || 'video',
+                    incomingSignal: callData,
+                  });
+                }
+              } catch (e) {
+                console.warn('[Global Call Listener] Failed to parse call notification content:', e);
+              }
+            }
+          }
+        )
+        .subscribe();
+
       return () => {
         supabase.removeChannel(callChannel);
+        supabase.removeChannel(dbNotificationChannel);
       };
     }
 
