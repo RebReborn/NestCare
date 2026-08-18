@@ -4,6 +4,7 @@ import { BottomNav } from '@/components/navigation/bottom-nav';
 import { SidebarNav } from '@/components/navigation/sidebar-nav';
 import { HeaderBar } from '@/components/navigation/header-bar';
 import { OnboardingBanner } from '@/components/onboarding/onboarding-banner';
+import { GlobalCallListener } from '@/components/video-call/global-call-listener';
 
 export default function DashboardLayout({
   children,
@@ -12,6 +13,7 @@ export default function DashboardLayout({
 }) {
   return (
     <div className="flex min-h-screen flex-col md:flex-row bg-bg">
+      <GlobalCallListener />
       <SidebarNav />
       <div className="flex-1 flex flex-col min-h-screen">
         <HeaderBar />

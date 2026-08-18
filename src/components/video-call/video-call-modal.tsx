@@ -283,6 +283,19 @@ export default function VideoCallModal({
         payload: { from: currentUser.id },
       });
     }
+
+    if (!isIncoming && partnerId) {
+      const partnerChannel = supabase.channel(`user_calls_${partnerId}`);
+      partnerChannel.subscribe((st) => {
+        if (st === 'SUBSCRIBED') {
+          partnerChannel.send({
+            type: 'broadcast',
+            event: 'cancel_call',
+            payload: { from: currentUser.id },
+          });
+        }
+      });
+    }
     cleanupCall();
     setTimeout(() => {
       onClose();
