@@ -273,6 +273,11 @@ export default function VideoCallModal({
     setCallState('connected');
     startDurationTimer();
 
+    // Trigger explicit play() on user gesture for iOS Safari & Android Chrome autoplay policies
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.play().catch(err => console.warn('[Mobile Autoplay] Video play trigger:', err));
+    }
+
     const sendAcceptSignal = () => {
       if (channelRef.current) {
         channelRef.current.send({
