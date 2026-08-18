@@ -419,6 +419,13 @@ export default function MessagesPage() {
             }));
             await supabase.from('message_reads').upsert(readsToInsert, { onConflict: 'message_id,user_id' });
           }
+
+          // Update conversation_participants last_read_at
+          await supabase.from('conversation_participants').upsert({
+            conversation_id: activeConv.id,
+            profile_id: currentUser.id,
+            last_read_at: new Date().toISOString(),
+          }, { onConflict: 'conversation_id,profile_id' });
         }
 
         // Fetch partner's last read timestamp
@@ -744,6 +751,57 @@ export default function MessagesPage() {
     setShowMenu(false);
   };
 
+  // Mark all unread messages in all conversations as read
+  const handleMarkAllAsRead = async () => {
+    if (!currentUser) return;
+    try {
+      const { data: convs } = await supabase
+        .from('conversations')
+        .select('id')
+        .or(`parent_id.eq.${currentUser.id},sitter_id.eq.${currentUser.id}`);
+
+      const convIds = (convs || []).map(c => c.id);
+
+      if (convIds.length > 0) {
+        const { data: unreadMsgs } = await supabase
+          .from('messages')
+          .select('id, conversation_id')
+          .neq('sender_id', currentUser.id)
+          .in('conversation_id', convIds);
+
+        if (unreadMsgs && unreadMsgs.length > 0) {
+          const reads = unreadMsgs.map(m => ({
+            message_id: m.id,
+            user_id: currentUser.id,
+          }));
+          await supabase.from('message_reads').upsert(reads, { onConflict: 'message_id,user_id', ignoreDuplicates: true });
+
+          const partUpserts = convIds.map(cId => ({
+            conversation_id: cId,
+            profile_id: currentUser.id,
+            last_read_at: new Date().toISOString(),
+          }));
+          await supabase.from('conversation_participants').upsert(partUpserts, { onConflict: 'conversation_id,profile_id' });
+        }
+      }
+
+      // Also mark all notifications as read for current user
+      await supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('profile_id', currentUser.id)
+        .eq('is_read', false);
+
+      toast.success('All messages & notifications marked as read!');
+      setTimeout(() => {
+        window.location.reload();
+      }, 300);
+    } catch (err) {
+      console.error('Failed to mark all as read:', err);
+      toast.error('Could not mark all as read.');
+    }
+  };
+
   // Moderation Report Submit Handler
   const handleReportSubmit = async () => {
     if (!currentUser || !activeConv?.partner_id) return;
@@ -792,9 +850,18 @@ export default function MessagesPage() {
             <h1 className="font-display text-lg font-black text-heading flex items-center gap-2">
               <MessageSquare className="h-5 w-5 text-primary" /> Messages
             </h1>
-            <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-100 text-emerald-800 text-xs font-black">
-              {conversations.length}
-            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleMarkAllAsRead}
+                className="px-2.5 py-1 rounded-xl bg-stone-100 hover:bg-emerald-50 text-stone-600 hover:text-emerald-700 active-press transition-colors text-[10px] font-bold flex items-center gap-1 border border-stone-200/80"
+                title="Mark all messages as read"
+              >
+                <CheckCheck className="h-3 w-3 text-primary" /> Mark all read
+              </button>
+              <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-100 text-emerald-800 text-xs font-black">
+                {conversations.length}
+              </span>
+            </div>
           </div>
 
           {/* Search Box */}
