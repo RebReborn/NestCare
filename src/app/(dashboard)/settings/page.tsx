@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { toast } from 'sonner';
 import { ThemeSettingsControl } from '@/components/theme-toggle';
 import { PaymentMethodsModal } from '@/components/payments/payment-methods-modal';
-import { Settings, LogOut, Loader2, Save, Baby, Plus, Trash2, Edit2, ShieldAlert, CheckCircle, Bell, FileText, User, CreditCard, Compass } from 'lucide-react';
+import { Settings, LogOut, Loader2, Save, Baby, Plus, Trash2, Edit2, ShieldAlert, CheckCircle, Bell, FileText, User, CreditCard, Compass, Ban, UserX, Search, ChevronDown, ChevronUp, ChevronRight, Receipt } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
 export default function SettingsPage() {
@@ -59,12 +59,42 @@ export default function SettingsPage() {
   
   const [savingContacts, setSavingContacts] = useState(false);
 
+  // Blocked users management state
+  const [blockedUsers, setBlockedUsers] = useState<any[]>([]);
+  const [unblockingId, setUnblockingId] = useState<string | null>(null);
+  const [blockSearchQuery, setBlockSearchQuery] = useState('');
+  const [isBlockedSectionExpanded, setIsBlockedSectionExpanded] = useState(true);
+
+  const filteredBlockedUsers = blockedUsers.filter((b) => {
+    if (!blockSearchQuery.trim()) return true;
+    const name = b.blocked?.display_name || '';
+    return name.toLowerCase().includes(blockSearchQuery.toLowerCase().trim());
+  });
+
   // Deactivate account panel state
   const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false);
   const [deactivating, setDeactivating] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [stripeConnected, setStripeConnected] = useState(false);
   const [useFloatingNav, setUseFloatingNav] = useState(false);
+
+  const handleUnblockUser = async (blockId: string, name: string) => {
+    try {
+      setUnblockingId(blockId);
+      const { error } = await supabase
+        .from('user_blocks')
+        .delete()
+        .eq('id', blockId);
+
+      if (error) throw error;
+      toast.success(`${name} has been unblocked.`);
+      setBlockedUsers(prev => prev.filter(b => b.id !== blockId));
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to unblock user.');
+    } finally {
+      setUnblockingId(null);
+    }
+  };
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -145,6 +175,18 @@ export default function SettingsPage() {
           if (stAcc && (stAcc.charges_enabled || stAcc.stripe_account_id)) {
             setStripeConnected(true);
           }
+
+          // Fetch blocked accounts
+          const { data: blocks } = await supabase
+            .from('user_blocks')
+            .select(`
+              id,
+              blocked_id,
+              created_at,
+              blocked:profiles!blocked_id(id, display_name, avatar_url, role)
+            `)
+            .eq('blocker_id', user.id);
+          setBlockedUsers(blocks || []);
 
           // Fetch notifications preference settings (simulated or database)
           const { data: pref } = await supabase
@@ -385,23 +427,34 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6 max-w-xl mx-auto">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-stone-100 dark:border-slate-800 pb-4">
         <div>
-          <h1 className="font-display text-2xl font-black text-heading">Account Settings</h1>
-          <p className="text-xs text-stone-400 mt-1">Manage private configurations, alerts, and billing options.</p>
+          <h1 className="font-display text-2xl font-black text-heading dark:text-white">Account Settings</h1>
+          <p className="text-xs text-stone-400 mt-0.5">Manage private configurations, alerts, and billing options.</p>
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => router.push('/profile')}
-            className="p-3.5 bg-stone-100 text-stone-600 rounded-2xl active-press hover:bg-stone-200 flex items-center gap-1.5 text-xs font-bold transition-all"
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          <Link
+            href="/transactions"
+            className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-emerald-50 dark:bg-emerald-950/40 text-primary rounded-2xl active-press hover:bg-emerald-100/80 flex items-center justify-center gap-1.5 text-xs font-bold transition-all border border-emerald-100 dark:border-emerald-900/50 shadow-2xs shrink-0"
           >
-            Public Profile
+            <Receipt className="h-4 w-4 shrink-0" />
+            <span>Billing & Receipts</span>
+          </Link>
+          <button
+            type="button"
+            onClick={() => router.push('/profile')}
+            className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-stone-100 dark:bg-slate-800 text-stone-700 dark:text-slate-200 rounded-2xl active-press hover:bg-stone-200 dark:hover:bg-slate-700 flex items-center justify-center gap-1.5 text-xs font-bold transition-all border border-stone-200/60 dark:border-slate-700 shrink-0"
+          >
+            <User className="h-4 w-4 shrink-0" />
+            <span>Public Profile</span>
           </button>
           <button
+            type="button"
             onClick={handleSignOut}
-            className="p-3.5 bg-red-50 text-red-600 rounded-2xl active-press hover:bg-red-100 flex items-center gap-1.5 text-xs font-bold transition-all"
+            className="px-3.5 py-2.5 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 rounded-2xl active-press hover:bg-rose-100 dark:hover:bg-rose-900/60 flex items-center justify-center gap-1.5 text-xs font-bold transition-all border border-rose-200/60 dark:border-rose-900/50 shrink-0"
           >
-            <LogOut className="h-4 w-4" /> Sign Out
+            <LogOut className="h-4 w-4 shrink-0" />
+            <span>Sign Out</span>
           </button>
         </div>
       </div>
@@ -1057,49 +1110,165 @@ export default function SettingsPage() {
       )}
 
       {/* Legal & Compliance Card */}
-      <div className="bg-white border border-stone-200 rounded-3xl p-6 shadow-sm space-y-4">
+      <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
         <h3 className="font-display text-sm font-bold text-heading flex items-center gap-2">
           <FileText className="h-5 w-5 text-primary" /> Legal & Support
         </h3>
-        <p className="text-[11px] text-stone-500">Read our policies, terms, and reach out to our support team for help.</p>
+        <p className="text-[11px] text-stone-500 dark:text-slate-400">Read our policies, terms, and reach out to our support team for help.</p>
         <div className="grid grid-cols-1 gap-2">
           <Link
             href="/privacy"
-            className="py-3 px-4 border border-stone-200 hover:bg-stone-50 hover:border-primary/30 rounded-xl text-[11px] font-bold text-stone-700 active-press transition-all flex items-center justify-between"
+            className="py-3 px-4 border border-stone-200 dark:border-slate-800 hover:bg-stone-50 dark:hover:bg-slate-800/80 hover:border-primary/40 rounded-2xl text-[11px] font-bold text-stone-800 dark:text-slate-200 active-press transition-all flex items-center justify-between group"
           >
-            <span className="flex items-center gap-2">
-              <span className="p-1.5 bg-emerald-50 rounded-lg border border-emerald-100">
-                <FileText className="h-3.5 w-3.5 text-primary" />
+            <span className="flex items-center gap-3">
+              <span className="p-2 bg-emerald-50 dark:bg-emerald-950/40 rounded-xl border border-emerald-100 dark:border-emerald-900/50 group-hover:scale-105 transition-transform">
+                <FileText className="h-4 w-4 text-primary" />
               </span>
-              Privacy Policy
+              <span>Privacy Policy</span>
             </span>
-            <span className="text-stone-300">›</span>
+            <ChevronRight className="h-4 w-4 text-stone-400 group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
           </Link>
           <Link
             href="/terms"
-            className="py-3 px-4 border border-stone-200 hover:bg-stone-50 hover:border-primary/30 rounded-xl text-[11px] font-bold text-stone-700 active-press transition-all flex items-center justify-between"
+            className="py-3 px-4 border border-stone-200 dark:border-slate-800 hover:bg-stone-50 dark:hover:bg-slate-800/80 hover:border-primary/40 rounded-2xl text-[11px] font-bold text-stone-800 dark:text-slate-200 active-press transition-all flex items-center justify-between group"
           >
-            <span className="flex items-center gap-2">
-              <span className="p-1.5 bg-stone-100 rounded-lg border border-stone-200">
-                <FileText className="h-3.5 w-3.5 text-stone-600" />
+            <span className="flex items-center gap-3">
+              <span className="p-2 bg-stone-100 dark:bg-slate-800 rounded-xl border border-stone-200 dark:border-slate-700 group-hover:scale-105 transition-transform">
+                <FileText className="h-4 w-4 text-stone-600 dark:text-slate-300" />
               </span>
-              Terms of Service
+              <span>Terms of Service</span>
             </span>
-            <span className="text-stone-300">›</span>
+            <ChevronRight className="h-4 w-4 text-stone-400 group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
           </Link>
           <Link
             href="/support"
-            className="py-3 px-4 border border-stone-200 hover:bg-stone-50 hover:border-sky-200 rounded-xl text-[11px] font-bold text-stone-700 active-press transition-all flex items-center justify-between"
+            className="py-3 px-4 border border-stone-200 dark:border-slate-800 hover:bg-stone-50 dark:hover:bg-slate-800/80 hover:border-sky-300 rounded-2xl text-[11px] font-bold text-stone-800 dark:text-slate-200 active-press transition-all flex items-center justify-between group"
           >
-            <span className="flex items-center gap-2">
-              <span className="p-1.5 bg-sky-50 rounded-lg border border-sky-100">
-                <Bell className="h-3.5 w-3.5 text-sky-600" />
+            <span className="flex items-center gap-3">
+              <span className="p-2 bg-sky-50 dark:bg-sky-950/40 rounded-xl border border-sky-100 dark:border-sky-900/50 group-hover:scale-105 transition-transform">
+                <Bell className="h-4 w-4 text-sky-600 dark:text-sky-400" />
               </span>
-              Support Center
+              <span>Support Center</span>
             </span>
-            <span className="text-stone-300">›</span>
+            <ChevronRight className="h-4 w-4 text-stone-400 group-hover:text-sky-500 group-hover:translate-x-0.5 transition-all" />
           </Link>
         </div>
+      </div>
+
+      {/* Blocked Accounts Management Card */}
+      <div className="bg-white border border-stone-200 rounded-3xl p-6 shadow-sm space-y-4 transition-all">
+        <div 
+          onClick={() => setIsBlockedSectionExpanded(v => !v)}
+          className="flex items-center justify-between cursor-pointer select-none group"
+        >
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-rose-50 rounded-2xl border border-rose-100/80 group-hover:scale-105 transition-transform">
+              <UserX className="h-5 w-5 text-rose-600" />
+            </div>
+            <div>
+              <h3 className="font-display text-sm font-bold text-heading">Blocked Accounts</h3>
+              <p className="text-[11px] text-stone-500">
+                Manage accounts you have restricted from contacting or booking you.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="px-3 py-1 rounded-full bg-rose-100/70 text-rose-800 text-xs font-black">
+              {blockedUsers.length}
+            </span>
+            <button className="p-1 text-stone-400 group-hover:text-stone-700 transition-colors">
+              {isBlockedSectionExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+            </button>
+          </div>
+        </div>
+
+        {isBlockedSectionExpanded && (
+          <div className="space-y-3 pt-2 border-t border-stone-100 animate-fade-in">
+            {blockedUsers.length > 3 && (
+              <div className="relative">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-stone-400" />
+                <input
+                  type="text"
+                  placeholder="Search blocked users by name..."
+                  value={blockSearchQuery}
+                  onChange={(e) => setBlockSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-8 py-2.5 bg-stone-50 border border-stone-200 rounded-2xl text-xs outline-none focus:border-rose-300 transition-colors placeholder:text-stone-400"
+                />
+                {blockSearchQuery && (
+                  <button
+                    onClick={() => setBlockSearchQuery('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-stone-400 hover:text-stone-600"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            )}
+
+            {filteredBlockedUsers.length === 0 ? (
+              <div className="py-6 text-center text-xs text-stone-400 italic bg-stone-50 rounded-2xl border border-dashed border-stone-200 space-y-1">
+                {blockedUsers.length === 0 ? (
+                  <p>You haven't blocked any users.</p>
+                ) : (
+                  <p>No blocked users matching "{blockSearchQuery}".</p>
+                )}
+              </div>
+            ) : (
+              <>
+                <div className="max-h-72 overflow-y-auto pr-1 space-y-2 scrollbar-thin">
+                  {filteredBlockedUsers.map((b) => {
+                    const u = b.blocked;
+                    return (
+                      <div
+                        key={b.id}
+                        className="p-3 bg-stone-50 hover:bg-stone-100/70 border border-stone-200/80 rounded-2xl flex items-center justify-between text-xs transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          {u?.avatar_url ? (
+                            <img src={u.avatar_url} alt={u.display_name} className="w-9 h-9 rounded-full object-cover border border-stone-200 shadow-xs" />
+                          ) : (
+                            <div className="w-9 h-9 rounded-full bg-stone-200 flex items-center justify-center font-black text-stone-600 text-xs">
+                              {u?.display_name?.charAt(0) || 'U'}
+                            </div>
+                          )}
+                          <div>
+                            <p className="font-bold text-stone-900 flex items-center gap-1.5">
+                              {u?.display_name || 'User'}
+                              <span className="px-2 py-0.5 rounded-md bg-stone-200/60 text-stone-600 text-[9px] font-extrabold uppercase">
+                                {u?.role || 'user'}
+                              </span>
+                            </p>
+                            <p className="text-[10px] text-stone-400">
+                              Blocked on {new Date(b.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                            </p>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => handleUnblockUser(b.id, u?.display_name || 'User')}
+                          disabled={unblockingId === b.id}
+                          className="px-3.5 py-1.5 bg-white border border-stone-200 hover:bg-rose-50 hover:border-rose-200 hover:text-rose-700 text-stone-700 rounded-xl text-xs font-bold active-press transition-all shadow-2xs flex items-center gap-1.5 disabled:opacity-50"
+                        >
+                          {unblockingId === b.id ? (
+                            <Loader2 className="h-3 w-3 animate-spin text-rose-600" />
+                          ) : (
+                            'Unblock'
+                          )}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {blockedUsers.length > 3 && (
+                  <div className="pt-1 text-right text-[10px] font-bold text-stone-400">
+                    Showing {filteredBlockedUsers.length} of {blockedUsers.length} blocked accounts
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Danger Zone: Account Deactivation */}

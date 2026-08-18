@@ -194,11 +194,38 @@ export default function CarefeedPage() {
         image_url: customImgUrl || null,
       };
 
-      const { error } = await supabase
+      const { data: newLog, error } = await supabase
         .from('care_logs')
-        .insert(insertData);
+        .insert(insertData)
+        .select()
+        .single();
 
       if (error) throw error;
+
+      if (newLog) {
+        setLogs(prev => {
+          if (prev.some(l => l.id === newLog.id)) return prev;
+          return [newLog, ...prev];
+        });
+      }
+
+      toast.success(`${category.charAt(0).toUpperCase() + category.slice(1)} logged! Parent notified.`);
+
+      // Fire instant SMS & Push Alert to parent
+      if (booking?.parent_id) {
+        fetch('/api/notifications/sms-push', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            bookingId,
+            recipientId: booking.parent_id,
+            type: 'carefeed_update',
+            title: `👶 Carefeed Update (${category.toUpperCase()})`,
+            message: `${category.toUpperCase()}: ${details || status} — Logged by sitter.`,
+            link: `/bookings/${bookingId}/carefeed`,
+          }),
+        }).catch(e => console.warn('[SMS Push Alert]', e.message));
+      }
 
       // Reset text inputs
       setMealDetails('');

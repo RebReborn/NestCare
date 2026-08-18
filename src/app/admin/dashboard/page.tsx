@@ -27,11 +27,16 @@ import {
   ArrowUpRight,
   Calculator,
   Activity,
-  Flag
+  Flag,
+  MessageSquare,
+  Eye,
+  User,
+  AlertTriangle,
+  Wrench
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
-type TabType = 'overview' | 'users' | 'bookings' | 'queue' | 'disputes' | 'reports' | 'settings' | 'audit';
+type TabType = 'overview' | 'users' | 'bookings' | 'queue' | 'disputes' | 'reports' | 'messages' | 'settings' | 'audit';
 
 export default function AdminDashboardPage() {
   const supabase = createClient();
@@ -58,14 +63,127 @@ export default function AdminDashboardPage() {
   const [disputes, setDisputes] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [userReports, setUserReports] = useState<any[]>([]);
+  const [flaggedMessages, setFlaggedMessages] = useState<any[]>([]);
+  const [messageReports, setMessageReports] = useState<any[]>([]);
   const [pricingConfig, setPricingConfig] = useState<any | null>(null);
+  const [platformSettings, setPlatformSettings] = useState<any>({
+    is_maintenance_mode: false,
+    maintenance_title: 'Scheduled Platform Maintenance',
+    maintenance_message: 'NestCare is currently undergoing scheduled platform upgrades to enhance system performance and security.',
+    estimated_completion: '30-60 minutes'
+  });
+  const [updatingSettings, setUpdatingSettings] = useState(false);
+
+  const handleSaveMaintenanceSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setUpdatingSettings(true);
+
+      const { error } = await supabase
+        .from('platform_settings')
+        .upsert({
+          id: platformSettings.id,
+          is_maintenance_mode: platformSettings.is_maintenance_mode,
+          maintenance_title: platformSettings.maintenance_title,
+          maintenance_message: platformSettings.maintenance_message,
+          estimated_completion: platformSettings.estimated_completion,
+          updated_at: new Date().toISOString(),
+        });
+
+      if (error) throw error;
+
+      // Fire Audit Logger API
+      await fetch('/api/admin/audit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: platformSettings.is_maintenance_mode ? 'enabled_maintenance_mode' : 'disabled_maintenance_mode',
+          entityType: 'platform_settings',
+          details: platformSettings.is_maintenance_mode
+            ? `Admin ENABLED maintenance mode ("${platformSettings.maintenance_title}")`
+            : 'Admin DISABLED maintenance mode (System Online)',
+          metadata: platformSettings,
+        }),
+      }).catch(e => console.warn('[Audit Log API]', e));
+
+      toast.success(platformSettings.is_maintenance_mode ? '🔴 Maintenance Mode is now ACTIVE' : '🟢 System Maintenance Disabled');
+      loadAdminData(true);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update maintenance settings.');
+    } finally {
+      setUpdatingSettings(false);
+    }
+  };
+
+  const [inspectingConvId, setInspectingConvId] = useState<string | null>(null);
+  const [inspectingMessages, setInspectingMessages] = useState<any[]>([]);
+  const [loadingInspectMessages, setLoadingInspectMessages] = useState<boolean>(false);
+
+  const handleAdminViewConversation = async (convId: string) => {
+    if (!convId) {
+      toast.error('No conversation ID found.');
+      return;
+    }
+    setInspectingConvId(convId);
+    setLoadingInspectMessages(true);
+    try {
+      await fetch('/api/admin/audit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'inspected_chat_transcript',
+          entityType: 'conversation',
+          entityId: convId,
+          details: `Admin inspected chat conversation transcript (${convId})`,
+        }),
+      }).catch(e => console.warn('[Audit Log API]', e));
+
+      const { data: msgs, error } = await supabase
+        .from('messages')
+        .select('*, sender:profiles(id, display_name, avatar_url, role)')
+        .eq('conversation_id', convId)
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+      setInspectingMessages(msgs || []);
+      loadAdminData(true);
+    } catch (err: any) {
+      console.error('Error fetching chat transcript:', err);
+      toast.error(err.message || 'Could not load conversation transcript.');
+    } finally {
+      setLoadingInspectMessages(false);
+    }
+  };
+
+  const handleResolveMessageReport = async (reportId: string, status: 'resolved' | 'dismissed') => {
+    try {
+      await supabase.from('message_reports').update({ status }).eq('id', reportId);
+      setMessageReports(prev => prev.map(r => r.id === reportId ? { ...r, status } : r));
+      toast.success(`Message report marked as ${status}.`);
+    } catch (err: any) {
+      toast.error(err.message || 'Action failed.');
+    }
+  };
+
+  const handleSuspendUserFromMessageReport = async (userId: string, reportId: string) => {
+    try {
+      await supabase.from('profiles').update({ is_suspended: true }).eq('id', userId);
+      await supabase.from('message_reports').update({ status: 'resolved' }).eq('id', reportId);
+      setMessageReports(prev => prev.map(r => r.id === reportId ? { ...r, status: 'resolved' } : r));
+      toast.success('User suspended and report resolved.');
+    } catch (err: any) {
+      toast.error(err.message || 'Action failed.');
+    }
+  };
 
   // Filters
   const [userSearch, setUserSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
 
   // Form states for pricing
-  const [platformPct, setPlatformPct] = useState(10);
+  const [parentFeePct, setParentFeePct] = useState(10);
+  const [sitterCommPct, setSitterCommPct] = useState(5);
+  const [platformPct, setPlatformPct] = useState(15);
   const [minFee, setMinFee] = useState(2);
   const [maxFee, setMaxFee] = useState(50);
   const [taxPct, setTaxPct] = useState(5);
@@ -153,10 +271,23 @@ export default function AdminDashboardPage() {
 
       if (pricing) {
         setPricingConfig(pricing);
-        setPlatformPct(Number(pricing.platform_percentage));
-        setMinFee(Number(pricing.min_platform_fee));
-        setMaxFee(Number(pricing.max_platform_fee));
-        setTaxPct(Number(pricing.tax_percentage));
+        setParentFeePct(Number(pricing.parent_service_fee_pct || 10));
+        setSitterCommPct(Number(pricing.sitter_commission_pct || 5));
+        setPlatformPct(Number(pricing.platform_percentage || 15));
+        setMinFee(Number(pricing.min_platform_fee || 2));
+        setMaxFee(Number(pricing.max_platform_fee || 50));
+        setTaxPct(Number(pricing.tax_percentage || 5));
+      }
+
+      // Fetch platform settings for maintenance mode
+      const { data: pSettings } = await supabase
+        .from('platform_settings')
+        .select('*')
+        .limit(1)
+        .maybeSingle();
+
+      if (pSettings) {
+        setPlatformSettings(pSettings);
       }
 
       // Fetch audit logs
@@ -178,6 +309,28 @@ export default function AdminDashboardPage() {
         `)
         .order('created_at', { ascending: false });
       setUserReports(reportsData || []);
+
+      // Fetch message reports
+      const { data: msgReportsData } = await supabase
+        .from('message_reports')
+        .select(`
+          *,
+          reporter:profiles!message_reports_reporter_id_fkey(display_name, email),
+          reported:profiles!message_reports_reported_id_fkey(display_name, email, role)
+        `)
+        .order('created_at', { ascending: false });
+      setMessageReports(msgReportsData || []);
+
+      // Fetch flagged messages (off-platform attempts)
+      const { data: flaggedData } = await supabase
+        .from('messages')
+        .select(`
+          *,
+          sender:profiles!messages_sender_id_fkey(display_name, email, role)
+        `)
+        .eq('flagged_for_review', true)
+        .order('created_at', { ascending: false });
+      setFlaggedMessages(flaggedData || []);
     } catch (err) {
       console.error('Error fetching admin details:', err);
       toast.error('Failed to load admin data.');
@@ -266,30 +419,29 @@ export default function AdminDashboardPage() {
     e.preventDefault();
     try {
       setUpdatingConfig(true);
-      
-      if (pricingConfig) {
-        await supabase
-          .from('pricing_config')
-          .update({ is_active: false })
-          .eq('id', pricingConfig.id);
+
+      const res = await fetch('/api/admin/pricing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          parentFeePct,
+          sitterCommPct,
+          minFee,
+          maxFee,
+          taxPct,
+        }),
+      });
+
+      const resData = await res.json();
+      if (!res.ok) throw new Error(resData.error || 'Failed to update pricing rules.');
+
+      if (resData.pricing) {
+        setPricingConfig(resData.pricing);
+        setPlatformPct(Number(resData.pricing.platform_percentage || (parentFeePct + sitterCommPct)));
       }
 
-      const { data: newPricing, error } = await supabase
-        .from('pricing_config')
-        .insert({
-          platform_percentage: platformPct,
-          min_platform_fee: minFee,
-          max_platform_fee: maxFee,
-          tax_percentage: taxPct,
-          currency: 'USD',
-          is_active: true,
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-      setPricingConfig(newPricing);
       toast.success('Platform financial parameters updated & active!');
+      loadAdminData(true);
     } catch (err: any) {
       toast.error(err.message || 'Pricing update failed.');
     } finally {
@@ -305,11 +457,16 @@ export default function AdminDashboardPage() {
     return matchesSearch && matchesRole;
   });
 
-  // Simulator values
-  const simSubtotal = 100;
-  const simFee = Math.min(maxFee, Math.max(minFee, (simSubtotal * platformPct) / 100));
-  const simTax = ((simSubtotal + simFee) * taxPct) / 100;
-  const simTotal = simSubtotal + simFee + simTax;
+  // Simulator values (2-hour booking @ $22/hr = $44 subtotal)
+  const simHours = 2;
+  const simHourlyRate = 22;
+  const simSubtotal = simHours * simHourlyRate; // $44.00
+  const simParentFee = Math.round((simSubtotal * parentFeePct) / 100 * 100) / 100; // $4.40
+  const simSitterComm = Math.round((simSubtotal * sitterCommPct) / 100 * 100) / 100; // $2.20
+  const simPlatformRevenue = simParentFee + simSitterComm; // $6.60
+  const simSitterPayout = simSubtotal - simSitterComm; // $41.80
+  const simTax = Math.round(((simSubtotal + simParentFee) * taxPct) / 100 * 100) / 100; // $2.42
+  const simParentTotal = simSubtotal + simParentFee + simTax; // $50.82
 
   if (loading) {
     return (
@@ -332,14 +489,27 @@ export default function AdminDashboardPage() {
           <p className="text-xs text-slate-300">Real-time user management, verification vetting, booking audits & revenue controls.</p>
         </div>
 
-        <button
-          onClick={() => loadAdminData(true)}
-          disabled={refreshing}
-          className="inline-flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition-all border border-white/10 active-press self-start md:self-auto"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-          {refreshing ? 'Refreshing...' : 'Refresh Metrics'}
-        </button>
+        <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
+          <button
+            onClick={() => setActiveTab('settings')}
+            className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all border active-press ${
+              platformSettings.is_maintenance_mode
+                ? 'bg-rose-600 hover:bg-rose-700 text-white border-rose-500 shadow-md animate-pulse'
+                : 'bg-white/10 hover:bg-white/20 text-white border-white/10'
+            }`}
+          >
+            <Wrench className="h-3.5 w-3.5" />
+            {platformSettings.is_maintenance_mode ? '🔴 Maintenance ACTIVE' : '⚙️ Maintenance & Settings'}
+          </button>
+          <button
+            onClick={() => loadAdminData(true)}
+            disabled={refreshing}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition-all border border-white/10 active-press"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+            {refreshing ? 'Refreshing...' : 'Refresh Metrics'}
+          </button>
+        </div>
       </div>
 
       {/* High Impact Executive Metrics */}
@@ -417,8 +587,9 @@ export default function AdminDashboardPage() {
           { id: 'bookings', label: 'Bookings', count: allBookings.length, icon: Calendar },
           { id: 'queue', label: 'Verification Queue', count: pendingSitters.length, icon: ShieldCheck, alert: pendingSitters.length > 0 },
           { id: 'disputes', label: 'Disputes', count: disputes.length, icon: ShieldAlert, alert: disputes.length > 0 },
-          { id: 'reports', label: 'Reports', count: userReports.filter(r => r.status === 'pending').length, icon: Flag, alert: userReports.filter(r => r.status === 'pending').length > 0 },
-          { id: 'settings', label: 'Financial Rules', icon: Calculator },
+          { id: 'reports', label: 'User Reports', count: userReports.filter(r => r.status === 'pending').length, icon: Flag, alert: userReports.filter(r => r.status === 'pending').length > 0 },
+          { id: 'messages', label: 'Chat Moderation', count: flaggedMessages.length + messageReports.filter(r => r.status === 'pending').length, icon: MessageSquare, alert: flaggedMessages.length > 0 },
+          { id: 'settings', label: 'Platform Settings & Maintenance', icon: Settings, alert: platformSettings.is_maintenance_mode },
           { id: 'audit', label: 'Audit Logs', icon: FileText },
         ].map((tab) => {
           const Icon = tab.icon;
@@ -559,8 +730,8 @@ export default function AdminDashboardPage() {
                     <span className="font-bold text-heading dark:text-white">${simSubtotal.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-stone-500 dark:text-slate-400">Platform Commission ({platformPct}%):</span>
-                    <span className="font-bold text-emerald-600 dark:text-emerald-400">+${simFee.toFixed(2)}</span>
+                    <span className="text-stone-500 dark:text-slate-400">Platform Revenue ({platformPct}%):</span>
+                    <span className="font-bold text-emerald-600 dark:text-emerald-400">+${simPlatformRevenue.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-stone-500 dark:text-slate-400">Applicable Tax ({taxPct}%):</span>
@@ -568,7 +739,7 @@ export default function AdminDashboardPage() {
                   </div>
                   <div className="border-t border-stone-200 dark:border-slate-700 pt-2 flex justify-between font-black text-sm text-heading dark:text-white">
                     <span>Parent Invoice Total:</span>
-                    <span>${simTotal.toFixed(2)}</span>
+                    <span>${simParentTotal.toFixed(2)}</span>
                   </div>
                 </div>
 
@@ -897,16 +1068,42 @@ export default function AdminDashboardPage() {
             
             <form onSubmit={handleUpdatePricing} className="space-y-4">
               <div className="space-y-3 text-xs">
-                <div>
-                  <label className="block text-stone-400 dark:text-slate-400 font-bold uppercase mb-1">Platform Commission Cut (%)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={platformPct}
-                    onChange={(e) => setPlatformPct(Number(e.target.value))}
-                    className="w-full p-3 rounded-xl border border-stone-200 dark:border-slate-700 bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary"
-                  />
-                  <p className="text-[10px] text-stone-400 mt-1">Percentage deducted from sitter earnings per booking.</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-stone-400 dark:text-slate-400 font-bold uppercase mb-1">Parent Fee (%)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={parentFeePct}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setParentFeePct(val);
+                        setPlatformPct(val + sitterCommPct);
+                      }}
+                      className="w-full p-3 rounded-xl border border-stone-200 dark:border-slate-700 bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary font-bold"
+                    />
+                    <p className="text-[10px] text-stone-400 mt-1">Added to parent invoice at checkout.</p>
+                  </div>
+                  <div>
+                    <label className="block text-stone-400 dark:text-slate-400 font-bold uppercase mb-1">Sitter Cut (%)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={sitterCommPct}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setSitterCommPct(val);
+                        setPlatformPct(parentFeePct + val);
+                      }}
+                      className="w-full p-3 rounded-xl border border-stone-200 dark:border-slate-700 bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary font-bold"
+                    />
+                    <p className="text-[10px] text-stone-400 mt-1">Deducted from sitter payout.</p>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 rounded-xl border border-emerald-100 dark:border-emerald-900/50 flex items-center justify-between text-xs">
+                  <span className="font-extrabold text-emerald-900 dark:text-emerald-300">Total NestCare Take Rate:</span>
+                  <span className="font-mono font-black text-primary text-sm">{(Number(parentFeePct) + Number(sitterCommPct)).toFixed(1)}%</span>
                 </div>
 
                 <div>
@@ -916,7 +1113,7 @@ export default function AdminDashboardPage() {
                     step="0.01"
                     value={taxPct}
                     onChange={(e) => setTaxPct(Number(e.target.value))}
-                    className="w-full p-3 rounded-xl border border-stone-200 dark:border-slate-700 bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary"
+                    className="w-full p-3 rounded-xl border border-stone-200 dark:border-slate-700 bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary font-bold"
                   />
                   <p className="text-[10px] text-stone-400 mt-1">Local GST / service tax applied to parent invoice.</p>
                 </div>
@@ -948,152 +1145,641 @@ export default function AdminDashboardPage() {
               <button
                 type="submit"
                 disabled={updatingConfig}
-                className="w-full py-3.5 bg-primary text-white text-xs font-bold rounded-xl active-press hover:bg-emerald-800 disabled:opacity-50 transition-colors"
+                className="w-full py-3.5 bg-primary text-white text-xs font-bold rounded-xl active-press hover:bg-emerald-800 disabled:opacity-50 transition-colors shadow-sm"
               >
-                {updatingConfig ? 'Saving Configurations...' : 'Save & Publish Rules'}
+                {updatingConfig ? 'Saving Configurations...' : 'Save & Publish Financial Rules'}
+              </button>
+            </form>
+          {/* Platform Maintenance Mode Controls Card */}
+          <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-stone-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <div className={`p-2 rounded-xl ${platformSettings.is_maintenance_mode ? 'bg-rose-100 text-rose-600 dark:bg-rose-950/60 dark:text-rose-300' : 'bg-amber-100 text-amber-600 dark:bg-amber-950/60 dark:text-amber-300'}`}>
+                  <Wrench className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="font-display text-base font-bold text-heading dark:text-white">Platform Maintenance Mode</h3>
+                  <p className="text-[10px] text-stone-400">Lock public & user access during scheduled upgrades while keeping admin tools live.</p>
+                </div>
+              </div>
+              <span className={`text-xs px-3 py-1 rounded-full font-black uppercase tracking-wider ${
+                platformSettings.is_maintenance_mode ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+              }`}>
+                {platformSettings.is_maintenance_mode ? '🔴 MAINTENANCE ACTIVE' : '🟢 SYSTEM ONLINE'}
+              </span>
+            </div>
+
+            <form onSubmit={handleSaveMaintenanceSettings} className="space-y-4 text-xs">
+              <div className="flex items-center justify-between p-4 bg-stone-50 dark:bg-slate-800/60 rounded-2xl border border-stone-200 dark:border-slate-700">
+                <div className="space-y-0.5">
+                  <label className="font-bold text-stone-800 dark:text-slate-200 block">Enable Maintenance Mode</label>
+                  <span className="text-[10px] text-stone-400">Redirect non-admin users to the maintenance notice screen.</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={platformSettings.is_maintenance_mode || false}
+                  onChange={(e) => setPlatformSettings({ ...platformSettings, is_maintenance_mode: e.target.checked })}
+                  className="w-5 h-5 accent-primary cursor-pointer"
+                />
+              </div>
+
+              <div>
+                <label className="block text-stone-400 font-bold uppercase mb-1 text-[10px]">Notice Title</label>
+                <input
+                  type="text"
+                  value={platformSettings.maintenance_title || ''}
+                  onChange={(e) => setPlatformSettings({ ...platformSettings, maintenance_title: e.target.value })}
+                  placeholder="e.g. Scheduled Platform Maintenance"
+                  className="w-full p-3 rounded-xl border border-stone-200 dark:border-slate-700 bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="block text-stone-400 font-bold uppercase mb-1 text-[10px]">User Message Notice</label>
+                <textarea
+                  rows={2}
+                  value={platformSettings.maintenance_message || ''}
+                  onChange={(e) => setPlatformSettings({ ...platformSettings, maintenance_message: e.target.value })}
+                  placeholder="Message explaining the maintenance window to users..."
+                  className="w-full p-3 rounded-xl border border-stone-200 dark:border-slate-700 bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="block text-stone-400 font-bold uppercase mb-1 text-[10px]">Estimated Duration</label>
+                <input
+                  type="text"
+                  value={platformSettings.estimated_completion || ''}
+                  onChange={(e) => setPlatformSettings({ ...platformSettings, estimated_completion: e.target.value })}
+                  placeholder="e.g. 30-60 minutes"
+                  className="w-full p-3 rounded-xl border border-stone-200 dark:border-slate-700 bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={updatingSettings}
+                className="w-full py-3.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl active-press disabled:opacity-50 transition-colors shadow-sm"
+              >
+                {updatingSettings ? 'Updating Settings...' : 'Update Maintenance Settings'}
               </button>
             </form>
           </div>
 
           <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
             <h3 className="font-display text-base font-bold text-heading dark:text-white flex items-center gap-2">
-              <Calculator className="h-5 w-5 text-emerald-600" /> Interactive Revenue Calculator
+              <Calculator className="h-5 w-5 text-emerald-600" /> Interactive Split-Fee Revenue Calculator
             </h3>
             
             <div className="p-5 bg-stone-50 dark:bg-slate-800 rounded-2xl border border-stone-200 dark:border-slate-700 space-y-3 text-xs">
               <div className="flex justify-between items-center">
-                <span className="text-stone-500 dark:text-slate-400">Sitter Hourly Rate:</span>
-                <span className="font-bold text-heading dark:text-white">$25.00 / hr</span>
+                <span className="text-stone-500 dark:text-slate-400 font-medium">Sitter Hourly Rate:</span>
+                <span className="font-bold text-heading dark:text-white">${simHourlyRate}.00 / hr</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-stone-500 dark:text-slate-400">Booking Duration:</span>
-                <span className="font-bold text-heading dark:text-white">4 Hours</span>
+                <span className="text-stone-500 dark:text-slate-400 font-medium">Booking Duration:</span>
+                <span className="font-bold text-heading dark:text-white">{simHours} Hours</span>
               </div>
               <div className="border-t border-stone-200 dark:border-slate-700 pt-2 flex justify-between">
-                <span className="text-stone-500 dark:text-slate-400">Booking Base Subtotal:</span>
-                <span className="font-extrabold text-heading dark:text-white">$100.00</span>
-              </div>
-              <div className="flex justify-between text-emerald-600 dark:text-emerald-400">
-                <span>Platform Cut ({platformPct}%):</span>
-                <span className="font-bold">+${simFee.toFixed(2)}</span>
+                <span className="text-stone-500 dark:text-slate-400 font-medium">Booking Base Subtotal:</span>
+                <span className="font-mono font-bold text-heading dark:text-white">${simSubtotal.toFixed(2)}</span>
               </div>
               <div className="flex justify-between text-stone-600 dark:text-slate-300">
-                <span>Tax ({taxPct}%):</span>
-                <span className="font-bold">+${simTax.toFixed(2)}</span>
+                <span>Parent Service Fee ({parentFeePct}%):</span>
+                <span className="font-mono font-bold text-emerald-600">+${simParentFee.toFixed(2)}</span>
               </div>
-              <div className="border-t border-stone-200 dark:border-slate-700 pt-2 flex justify-between font-black text-sm text-heading dark:text-white">
-                <span>Parent Total Invoice:</span>
-                <span>${simTotal.toFixed(2)}</span>
+              <div className="flex justify-between text-stone-600 dark:text-slate-300">
+                <span>Sitter Commission Cut ({sitterCommPct}%):</span>
+                <span className="font-mono font-bold text-emerald-600">+${simSitterComm.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-stone-600 dark:text-slate-300">
+                <span>GST/HST Tax ({taxPct}%):</span>
+                <span className="font-mono font-bold">+${simTax.toFixed(2)}</span>
+              </div>
+
+              <div className="border-t border-stone-200 dark:border-slate-700 pt-2.5 space-y-1">
+                <div className="flex justify-between font-extrabold text-xs text-heading dark:text-white">
+                  <span>Parent Total at Checkout:</span>
+                  <span className="font-mono text-primary">${simParentTotal.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between font-extrabold text-xs text-heading dark:text-white">
+                  <span>Sitter Net Payout (Stripe Connect):</span>
+                  <span className="font-mono text-emerald-600">${simSitterPayout.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between font-black text-xs text-emerald-800 dark:text-emerald-300 pt-1">
+                  <span>Total NestCare Platform Revenue:</span>
+                  <span className="font-mono">${simPlatformRevenue.toFixed(2)} ({platformPct}%)</span>
+                </div>
               </div>
             </div>
           </div>
         </div>
-      )}
+      </div>
+    )}
 
       {/* TAB 7: AUDIT LOGS */}
       {activeTab === 'audit' && (
-        <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
-          <h3 className="font-display text-lg font-bold text-heading dark:text-white">Audit Trail Stream ({auditLogs.length})</h3>
-
-          <div className="space-y-2">
-            {auditLogs.map((log) => (
-              <div key={log.id} className="p-4 bg-stone-50 dark:bg-slate-800/70 rounded-2xl border border-stone-200 dark:border-slate-700 flex justify-between items-center text-xs">
-                <div>
-                  <span className="font-bold text-stone-800 dark:text-slate-200 block capitalize">{log.action.replace(/_/g, ' ')}</span>
-                  <span className="text-[10px] font-mono text-stone-400">Entity: {log.entity_type} ({log.entity_id?.slice(0, 8)})</span>
-                </div>
-                <span className="text-[10px] font-bold text-stone-500 dark:text-slate-400 bg-stone-200 dark:bg-slate-700 px-2 py-1 rounded-lg">
-                  {new Date(log.created_at).toLocaleString()}
-                </span>
-              </div>
-            ))}
+        <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-6">
+          <div className="flex items-center justify-between border-b border-stone-100 dark:border-slate-800 pb-4">
+            <div>
+              <h3 className="font-display text-lg font-bold text-heading dark:text-white flex items-center gap-2">
+                <FileText className="h-5 w-5 text-primary" /> Administrative Audit Trail Stream ({auditLogs.length})
+              </h3>
+              <p className="text-xs text-stone-500 dark:text-slate-400">
+                Complete system log tracking all administrative account sign-ins, approvals, overrides, maintenance toggles, and chat inspections.
+              </p>
+            </div>
+            <span className="text-xs bg-stone-100 dark:bg-slate-800 text-stone-600 dark:text-slate-300 px-3.5 py-1.5 rounded-full font-bold">
+              Real-Time Security Logging
+            </span>
           </div>
+
+          {auditLogs.length === 0 ? (
+            <div className="bg-stone-50 dark:bg-slate-800/40 rounded-2xl p-8 text-center text-xs text-stone-400 font-medium italic border border-stone-200 dark:border-slate-800">
+              No administrative audit logs recorded yet.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {auditLogs.map((log) => {
+                const adminName = log.admin?.display_name || 'System Admin';
+                const adminEmail = log.admin?.email || '';
+                const adminAvatar = log.admin?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100';
+
+                return (
+                  <div 
+                    key={log.id} 
+                    className="p-4 bg-stone-50 dark:bg-slate-800/70 rounded-2xl border border-stone-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                  >
+                    <div className="flex items-center gap-3.5">
+                      <img
+                        src={adminAvatar}
+                        alt="Admin Avatar"
+                        className="w-9 h-9 rounded-xl object-cover border border-stone-200 dark:border-slate-700 shrink-0"
+                      />
+                      <div className="space-y-0.5 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-extrabold text-heading dark:text-white">
+                            {adminName}
+                          </span>
+                          {adminEmail && (
+                            <span className="text-[10px] text-stone-400 font-mono">
+                              ({adminEmail})
+                            </span>
+                          )}
+                          <span className={`text-[9px] px-2.5 py-0.5 rounded-full font-black uppercase tracking-wider ${
+                            log.action.includes('maintenance') ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300' :
+                            log.action.includes('approve') || log.action.includes('activate') ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300' :
+                            log.action.includes('suspend') || log.action.includes('reject') ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300' :
+                            'bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300'
+                          }`}>
+                            {log.action.replace(/_/g, ' ')}
+                          </span>
+                        </div>
+
+                        <p className="text-xs text-stone-700 dark:text-slate-200 font-medium">
+                          {log.details || log.action}
+                        </p>
+
+                        <div className="flex items-center gap-3 text-[10px] text-stone-400 font-mono pt-0.5">
+                          {log.entity_type && (
+                            <span>Entity: <strong className="text-stone-600 dark:text-slate-300">{log.entity_type}</strong> {log.entity_id ? `(${log.entity_id.slice(0, 8)})` : ''}</span>
+                          )}
+                          {log.ip_address && (
+                            <span>IP: {log.ip_address}</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="shrink-0 text-right">
+                      <span className="text-[10px] font-bold text-stone-500 dark:text-slate-400 bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 px-3 py-1 rounded-xl block font-mono">
+                        {new Date(log.created_at).toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
       {/* TAB 8: USER REPORTS */}
       {activeTab === 'reports' && (
-        <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
+        <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-6">
           <div className="flex items-center justify-between">
-            <h3 className="font-display text-lg font-bold text-heading dark:text-white flex items-center gap-2">
-              <Flag className="h-5 w-5 text-amber-500" /> User Reports
-            </h3>
-            <span className="text-xs bg-amber-50 border border-amber-100 text-amber-700 px-3 py-1 rounded-full font-bold">
-              {userReports.filter(r => r.status === 'pending').length} Pending Review
+            <div>
+              <h3 className="font-display text-lg font-bold text-heading dark:text-white flex items-center gap-2">
+                <Flag className="h-5 w-5 text-amber-500" /> User Reports & Moderation Center
+              </h3>
+              <p className="text-xs text-stone-500">Review reported users, chat behavior flags, and moderation actions.</p>
+            </div>
+            <span className="text-xs bg-amber-50 border border-amber-100 text-amber-700 px-3.5 py-1.5 rounded-full font-bold">
+              {userReports.filter(r => r.status === 'pending').length + messageReports.filter(r => r.status === 'pending').length} Pending Review
             </span>
           </div>
 
-          {userReports.length === 0 ? (
-            <div className="text-center py-12 bg-stone-50 rounded-2xl border border-stone-100">
-              <Check className="h-8 w-8 text-emerald-500 mx-auto mb-2" />
-              <p className="text-xs font-bold text-stone-700">No reports submitted yet.</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {userReports.map((report) => (
-                <div key={report.id} className="p-4 bg-stone-50 dark:bg-slate-800/70 rounded-2xl border border-stone-200 dark:border-slate-700 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-amber-50 rounded-xl">
-                        <Flag className="h-4 w-4 text-amber-500" />
+          {/* Section A: Chat & Messaging Reports */}
+          <div className="space-y-3">
+            <h4 className="font-bold text-xs text-rose-700 uppercase tracking-wider flex items-center gap-1.5">
+              <MessageSquare className="h-4 w-4 text-rose-600" /> Chat Conversation Reports ({messageReports.length})
+            </h4>
+
+            {messageReports.length === 0 ? (
+              <div className="p-4 bg-stone-50 rounded-2xl text-xs text-stone-500 font-medium italic border border-stone-100">
+                No chat reports submitted yet.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {messageReports.map((report) => (
+                  <div key={report.id} className="p-4 bg-stone-50 dark:bg-slate-800/70 rounded-2xl border border-stone-200 dark:border-slate-700 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-rose-50 rounded-xl">
+                          <Flag className="h-4 w-4 text-rose-600" />
+                        </div>
+                        <div>
+                          <span className="font-bold text-xs text-heading dark:text-white block">
+                            {report.reporter?.display_name || 'Reporter'} → reported → {report.reported?.display_name || 'Reported User'}
+                          </span>
+                          <span className="text-[10px] text-stone-400">{new Date(report.created_at).toLocaleString()} · Category: <strong className="text-rose-600">{report.reason_category}</strong></span>
+                        </div>
                       </div>
-                      <div>
-                        <span className="font-bold text-xs text-heading dark:text-white block">
-                          {report.reporter?.display_name || 'Unknown'} → reported → {report.reported?.display_name || 'Unknown'}
-                        </span>
-                        <span className="text-[10px] text-stone-400">{new Date(report.created_at).toLocaleString()} · Role: {report.reported?.role}</span>
-                      </div>
+                      <span className={`text-[9px] px-2.5 py-1 rounded-full font-black uppercase tracking-wider ${
+                        report.status === 'pending' ? 'bg-amber-100 text-amber-700' :
+                        report.status === 'resolved' ? 'bg-emerald-100 text-emerald-700' :
+                        'bg-stone-200 text-stone-500'
+                      }`}>{report.status}</span>
                     </div>
-                    <span className={`text-[9px] px-2 py-1 rounded-full font-black uppercase tracking-wider ${
-                      report.status === 'pending' ? 'bg-amber-100 text-amber-700' :
-                      report.status === 'resolved' ? 'bg-emerald-100 text-emerald-700' :
-                      'bg-stone-200 text-stone-500'
-                    }`}>{report.status}</span>
+
+                    {report.details && (
+                      <p className="text-xs text-stone-700 dark:text-slate-200 bg-white dark:bg-slate-900 p-3 rounded-xl border border-stone-200/80 font-medium">
+                        "{report.details}"
+                      </p>
+                    )}
+
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      {report.conversation_id && (
+                        <button
+                          onClick={() => handleAdminViewConversation(report.conversation_id)}
+                          className="px-3.5 py-2 bg-heading hover:bg-stone-800 text-white rounded-xl text-[10px] font-bold active-press transition-colors flex items-center gap-1 shrink-0"
+                        >
+                          <Eye className="h-3.5 w-3.5" /> Inspect Conversation Log
+                        </button>
+                      )}
+
+                      {report.status === 'pending' && (
+                        <>
+                          <button
+                            onClick={() => handleResolveMessageReport(report.id, 'resolved')}
+                            className="px-3.5 py-2 bg-emerald-100 text-emerald-800 hover:bg-emerald-200 rounded-xl text-[10px] font-bold transition-colors active-press shrink-0"
+                          >
+                            ✓ Resolve Report
+                          </button>
+                          <button
+                            onClick={() => handleResolveMessageReport(report.id, 'dismissed')}
+                            className="px-3.5 py-2 bg-stone-200 text-stone-700 hover:bg-stone-300 rounded-xl text-[10px] font-bold transition-colors active-press shrink-0"
+                          >
+                            Dismiss
+                          </button>
+                          <button
+                            onClick={() => handleSuspendUserFromMessageReport(report.reported_id, report.id)}
+                            className="px-3.5 py-2 bg-rose-100 text-rose-800 hover:bg-rose-200 rounded-xl text-[10px] font-bold transition-colors active-press shrink-0"
+                          >
+                            ⚠ Suspend Reported User
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
+                ))}
+              </div>
+            )}
+          </div>
 
-                  <p className="text-xs text-stone-600 dark:text-slate-300 bg-white dark:bg-slate-900 p-3 rounded-xl border border-stone-100 italic">
-                    "{report.reason}"
-                  </p>
+          {/* Section B: Profile Reports */}
+          <div className="space-y-3 pt-4 border-t border-stone-100 dark:border-slate-800">
+            <h4 className="font-bold text-xs text-amber-700 uppercase tracking-wider flex items-center gap-1.5">
+              <User className="h-4 w-4 text-amber-600" /> Account Profile Reports ({userReports.length})
+            </h4>
 
-                  {report.status === 'pending' && (
-                    <div className="flex gap-2">
+            {userReports.length === 0 ? (
+              <div className="p-4 bg-stone-50 rounded-2xl text-xs text-stone-500 font-medium italic border border-stone-100">
+                No account profile reports submitted.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {userReports.map((report) => (
+                  <div key={report.id} className="p-4 bg-stone-50 dark:bg-slate-800/70 rounded-2xl border border-stone-200 dark:border-slate-700 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-amber-50 rounded-xl">
+                          <Flag className="h-4 w-4 text-amber-500" />
+                        </div>
+                        <div>
+                          <span className="font-bold text-xs text-heading dark:text-white block">
+                            {report.reporter?.display_name || 'Unknown'} → reported → {report.reported?.display_name || 'Unknown'}
+                          </span>
+                          <span className="text-[10px] text-stone-400">{new Date(report.created_at).toLocaleString()} · Role: {report.reported?.role}</span>
+                        </div>
+                      </div>
+                      <span className={`text-[9px] px-2 py-1 rounded-full font-black uppercase tracking-wider ${
+                        report.status === 'pending' ? 'bg-amber-100 text-amber-700' :
+                        report.status === 'resolved' ? 'bg-emerald-100 text-emerald-700' :
+                        'bg-stone-200 text-stone-500'
+                      }`}>{report.status}</span>
+                    </div>
+
+                    <p className="text-xs text-stone-600 dark:text-slate-300 bg-white dark:bg-slate-900 p-3 rounded-xl border border-stone-100 italic">
+                      "{report.reason}"
+                    </p>
+
+                    {report.status === 'pending' && (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={async () => {
+                            await supabase.from('user_reports').update({ status: 'resolved' }).eq('id', report.id);
+                            setUserReports(prev => prev.map(r => r.id === report.id ? { ...r, status: 'resolved' } : r));
+                            toast.success('Report marked as resolved.');
+                          }}
+                          className="px-3.5 py-2 bg-emerald-100 text-emerald-700 rounded-xl text-[10px] font-bold hover:bg-emerald-200 transition-colors active-press"
+                        >
+                          ✓ Resolve
+                        </button>
+                        <button
+                          onClick={async () => {
+                            await supabase.from('user_reports').update({ status: 'dismissed' }).eq('id', report.id);
+                            setUserReports(prev => prev.map(r => r.id === report.id ? { ...r, status: 'dismissed' } : r));
+                            toast.success('Report dismissed.');
+                          }}
+                          className="px-3.5 py-2 bg-stone-100 text-stone-600 rounded-xl text-[10px] font-bold hover:bg-stone-200 transition-colors active-press"
+                        >
+                          Dismiss
+                        </button>
+                        <button
+                          onClick={async () => {
+                            await supabase.from('profiles').update({ is_suspended: true }).eq('id', report.reported_id);
+                            await supabase.from('user_reports').update({ status: 'resolved' }).eq('id', report.id);
+                            setUserReports(prev => prev.map(r => r.id === report.id ? { ...r, status: 'resolved' } : r));
+                            toast.success('User suspended and report resolved.');
+                          }}
+                          className="px-3.5 py-2 bg-red-100 text-red-700 rounded-xl text-[10px] font-bold hover:bg-red-200 transition-colors active-press"
+                        >
+                          ⚠ Suspend User
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 9: CHAT MODERATION & OFF-PLATFORM SECURITY */}
+      {activeTab === 'messages' && (
+        <div className="space-y-6">
+          <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-6">
+            <div className="flex items-center justify-between border-b border-stone-100 dark:border-slate-800 pb-4">
+              <div>
+                <h3 className="font-display text-lg font-bold text-heading dark:text-white flex items-center gap-2">
+                  <MessageSquare className="h-5 w-5 text-primary" /> Chat Moderation & Off-Platform Security Center
+                </h3>
+                <p className="text-xs text-stone-500 dark:text-slate-400">
+                  Monitor flagged off-platform payment attempts, reported user conversations, and administrative audit logs.
+                </p>
+              </div>
+              <span className="text-xs bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/50 text-amber-700 dark:text-amber-300 px-3.5 py-1.5 rounded-full font-extrabold">
+                {flaggedMessages.length + messageReports.filter(r => r.status === 'pending').length} Pending Action Items
+              </span>
+            </div>
+
+            {/* Subsection A: Flagged Off-Platform Payment Attempts */}
+            <div className="space-y-3">
+              <h4 className="font-extrabold text-xs text-amber-700 dark:text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                <AlertCircle className="h-4 w-4" /> Flagged Off-Platform Payment Attempts ({flaggedMessages.length})
+              </h4>
+
+              {flaggedMessages.length === 0 ? (
+                <div className="p-4 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-900/50 rounded-2xl text-xs text-emerald-800 dark:text-emerald-300 font-bold flex items-center gap-2">
+                  <Check className="h-4 w-4 text-emerald-600" /> No off-platform payment attempts or suspicious contact keywords detected.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {flaggedMessages.map((msg) => (
+                    <div key={msg.id} className="p-4 bg-amber-50/70 dark:bg-slate-800/80 border border-amber-200 dark:border-amber-900/50 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+                      <div className="space-y-1 min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-stone-900 dark:text-white">{msg.sender?.display_name || 'User'}</span>
+                          <span className="text-[9px] px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-300 font-bold uppercase">{msg.sender?.role}</span>
+                          <span className="text-[10px] text-stone-400">{new Date(msg.created_at).toLocaleString()}</span>
+                        </div>
+                        <p className="text-stone-800 dark:text-slate-200 font-medium italic bg-white dark:bg-slate-900 p-3 rounded-xl border border-amber-100 dark:border-slate-700">
+                          "{msg.content}"
+                        </p>
+                        <p className="text-[10px] text-amber-800 dark:text-amber-300 font-extrabold flex items-center gap-1">
+                          <AlertCircle className="h-3 w-3" /> Reason: {msg.flag_reason || 'Off-platform keyword detected'}
+                        </p>
+                      </div>
+
                       <button
-                        onClick={async () => {
-                          await supabase.from('user_reports').update({ status: 'resolved' }).eq('id', report.id);
-                          setUserReports(prev => prev.map(r => r.id === report.id ? { ...r, status: 'resolved' } : r));
-                          toast.success('Report marked as resolved.');
-                        }}
-                        className="px-3 py-2 bg-emerald-100 text-emerald-700 rounded-xl text-[10px] font-bold hover:bg-emerald-200 transition-colors active-press"
+                        onClick={() => handleAdminViewConversation(msg.conversation_id)}
+                        className="px-4 py-2.5 bg-primary hover:bg-emerald-800 text-white rounded-xl text-xs font-bold active-press transition-colors shadow-2xs shrink-0 flex items-center gap-1.5"
                       >
-                        ✓ Resolve
-                      </button>
-                      <button
-                        onClick={async () => {
-                          await supabase.from('user_reports').update({ status: 'dismissed' }).eq('id', report.id);
-                          setUserReports(prev => prev.map(r => r.id === report.id ? { ...r, status: 'dismissed' } : r));
-                          toast.success('Report dismissed.');
-                        }}
-                        className="px-3 py-2 bg-stone-100 text-stone-600 rounded-xl text-[10px] font-bold hover:bg-stone-200 transition-colors active-press"
-                      >
-                        Dismiss
-                      </button>
-                      <button
-                        onClick={async () => {
-                          await supabase.from('profiles').update({ is_suspended: true }).eq('id', report.reported_id);
-                          await supabase.from('user_reports').update({ status: 'resolved' }).eq('id', report.id);
-                          setUserReports(prev => prev.map(r => r.id === report.id ? { ...r, status: 'resolved' } : r));
-                          toast.success('User suspended and report resolved.');
-                        }}
-                        className="px-3 py-2 bg-red-100 text-red-700 rounded-xl text-[10px] font-bold hover:bg-red-200 transition-colors active-press"
-                      >
-                        ⚠ Suspend User
+                        <Eye className="h-4 w-4" /> Inspect Chat Log
                       </button>
                     </div>
-                  )}
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
-          )}
+
+            {/* Subsection B: Reported Chat Conversations */}
+            <div className="space-y-3 pt-4 border-t border-stone-100 dark:border-slate-800">
+              <h4 className="font-extrabold text-xs text-rose-700 dark:text-rose-400 uppercase tracking-wider flex items-center gap-1.5">
+                <Flag className="h-4 w-4 text-rose-600" /> Reported User Conversations ({messageReports.length})
+              </h4>
+
+              {messageReports.length === 0 ? (
+                <div className="p-4 bg-stone-50 dark:bg-slate-800/40 rounded-2xl text-xs text-stone-500 dark:text-slate-400 font-medium italic border border-stone-100 dark:border-slate-800">
+                  No conversation reports submitted yet.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {messageReports.map((report) => (
+                    <div key={report.id} className="p-4 bg-stone-50 dark:bg-slate-800/70 rounded-2xl border border-stone-200 dark:border-slate-700 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-rose-50 dark:bg-rose-950/40 rounded-xl">
+                            <Flag className="h-4 w-4 text-rose-600" />
+                          </div>
+                          <div>
+                            <span className="font-bold text-xs text-heading dark:text-white block">
+                              {report.reporter?.display_name || 'Reporter'} → reported → {report.reported?.display_name || 'Reported User'}
+                            </span>
+                            <span className="text-[10px] text-stone-400">{new Date(report.created_at).toLocaleString()} · Category: <strong className="text-rose-600">{report.reason_category}</strong></span>
+                          </div>
+                        </div>
+                        <span className={`text-[9px] px-2.5 py-1 rounded-full font-black uppercase tracking-wider ${
+                          report.status === 'pending' ? 'bg-amber-100 text-amber-700' :
+                          report.status === 'resolved' ? 'bg-emerald-100 text-emerald-700' :
+                          'bg-stone-200 text-stone-500'
+                        }`}>{report.status}</span>
+                      </div>
+
+                      {report.details && (
+                        <p className="text-xs text-stone-700 dark:text-slate-200 bg-white dark:bg-slate-900 p-3 rounded-xl border border-stone-200/80 font-medium">
+                          "{report.details}"
+                        </p>
+                      )}
+
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        {report.conversation_id && (
+                          <button
+                            onClick={() => handleAdminViewConversation(report.conversation_id)}
+                            className="px-3.5 py-2 bg-heading hover:bg-stone-800 text-white rounded-xl text-[10px] font-bold active-press transition-colors flex items-center gap-1 shrink-0"
+                          >
+                            <Eye className="h-3.5 w-3.5" /> Inspect Conversation Log
+                          </button>
+                        )}
+
+                        {report.status === 'pending' && (
+                          <>
+                            <button
+                              onClick={() => handleResolveMessageReport(report.id, 'resolved')}
+                              className="px-3.5 py-2 bg-emerald-100 text-emerald-800 hover:bg-emerald-200 rounded-xl text-[10px] font-bold transition-colors active-press shrink-0"
+                            >
+                              ✓ Resolve Report
+                            </button>
+                            <button
+                              onClick={() => handleResolveMessageReport(report.id, 'dismissed')}
+                              className="px-3.5 py-2 bg-stone-200 text-stone-700 hover:bg-stone-300 rounded-xl text-[10px] font-bold transition-colors active-press shrink-0"
+                            >
+                              Dismiss
+                            </button>
+                            <button
+                              onClick={() => handleSuspendUserFromMessageReport(report.reported_id, report.id)}
+                              className="px-3.5 py-2 bg-rose-100 text-rose-800 hover:bg-rose-200 rounded-xl text-[10px] font-bold transition-colors active-press shrink-0"
+                            >
+                              ⚠ Suspend Reported User
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ADMIN CHAT LOG INSPECTOR MODAL */}
+      {inspectingConvId && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 max-w-2xl w-full space-y-4 shadow-2xl relative max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-stone-100 dark:border-slate-800 pb-3 shrink-0">
+              <div>
+                <h3 className="font-display text-base font-black text-heading dark:text-white flex items-center gap-2">
+                  <Eye className="h-5 w-5 text-primary" /> Inspect Chat Log
+                </h3>
+                <p className="text-[10px] text-stone-400 font-mono">ID: {inspectingConvId}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => router.push(`/messages?convId=${inspectingConvId}`)}
+                  className="px-3 py-1.5 bg-stone-100 dark:bg-slate-800 text-stone-700 dark:text-slate-200 rounded-xl text-xs font-bold hover:bg-stone-200 active-press transition-colors"
+                >
+                  Open Full Screen
+                </button>
+                <button
+                  onClick={() => { setInspectingConvId(null); setInspectingMessages([]); }}
+                  className="p-1 rounded-xl hover:bg-stone-100 dark:hover:bg-slate-800 text-stone-400"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* MESSAGE LIST SCROLL AREA */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-stone-50/50 dark:bg-slate-950/40 rounded-2xl border border-stone-100 dark:border-slate-800">
+              {loadingInspectMessages ? (
+                <div className="flex justify-center items-center h-48 text-stone-400 text-xs font-bold">
+                  <Loader2 className="h-5 w-5 animate-spin mr-2 text-primary" /> Loading transcript...
+                </div>
+              ) : inspectingMessages.length === 0 ? (
+                <div className="text-center py-12 text-stone-400 text-xs italic font-medium">
+                  No messages found in this conversation.
+                </div>
+              ) : (
+                inspectingMessages.map((msg) => {
+                  const isFlagged = msg.flagged_for_review;
+                  return (
+                    <div
+                      key={msg.id}
+                      className={`p-3.5 rounded-2xl border text-xs space-y-1.5 ${
+                        isFlagged
+                          ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900/60'
+                          : 'bg-white dark:bg-slate-900 border-stone-200 dark:border-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="font-extrabold text-stone-900 dark:text-white">
+                            {msg.sender?.display_name || 'User'}
+                          </span>
+                          <span className="text-[9px] px-2 py-0.5 rounded bg-stone-100 dark:bg-slate-800 font-bold uppercase text-stone-500">
+                            {msg.sender?.role}
+                          </span>
+                          {isFlagged && (
+                            <span className="text-[9px] px-2 py-0.5 rounded bg-rose-100 dark:bg-rose-900/60 text-rose-700 dark:text-rose-300 font-extrabold flex items-center gap-1">
+                              <AlertTriangle className="h-3 w-3" /> Flagged
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-stone-400 font-mono">
+                          {new Date(msg.created_at).toLocaleString()}
+                        </span>
+                      </div>
+
+                      <p className="text-stone-800 dark:text-slate-200 font-medium leading-relaxed">
+                        {msg.content}
+                      </p>
+
+                      {msg.attachment_url && (
+                        <div className="pt-1">
+                          {msg.message_type === 'image' ? (
+                            <img src={msg.attachment_url} alt="Attachment" className="max-h-48 rounded-xl object-cover border border-stone-200" />
+                          ) : (
+                            <a href={msg.attachment_url} target="_blank" rel="noreferrer" className="text-primary hover:underline font-bold text-[11px] flex items-center gap-1">
+                              📄 View Attachment Document
+                            </a>
+                          )}
+                        </div>
+                      )}
+
+                      {isFlagged && msg.flag_reason && (
+                        <p className="text-[10px] text-rose-700 dark:text-rose-400 font-bold pt-1 border-t border-rose-200/50">
+                          Flag Reason: {msg.flag_reason}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="pt-2 flex justify-end shrink-0">
+              <button
+                onClick={() => { setInspectingConvId(null); setInspectingMessages([]); }}
+                className="px-5 py-2.5 bg-stone-900 dark:bg-white text-white dark:text-stone-900 rounded-xl text-xs font-bold active-press"
+              >
+                Close Inspector
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

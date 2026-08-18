@@ -14,6 +14,10 @@ export interface CalculatedPrice {
   pricing_model?: 'flat' | 'additional_child' | 'per_child';
   base_hourly_rate_cents?: number;
   additional_child_rate_cents?: number;
+  parent_fee?: number;
+  sitter_commission?: number;
+  sitter_earnings?: number;
+  platform_revenue?: number;
 }
 
 export async function calculateBookingPrice(
@@ -35,7 +39,11 @@ export async function calculateBookingPrice(
     hourly_rate: pricing.hourlyRateCents / 100,
     duration_minutes: pricing.durationMinutes,
     subtotal: pricing.subtotalCents / 100,
-    platform_fee: pricing.platformFeeCents / 100,
+    platform_fee: pricing.parentFeeCents / 100,
+    parent_fee: pricing.parentFeeCents / 100,
+    sitter_commission: pricing.sitterCommissionCents / 100,
+    sitter_earnings: pricing.sitterEarningsCents / 100,
+    platform_revenue: pricing.platformFeeCents / 100,
     tax: pricing.taxCents / 100,
     total: pricing.totalCents / 100,
     currency: pricing.currency,

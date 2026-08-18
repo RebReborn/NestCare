@@ -9,6 +9,9 @@ import { createClient } from '@/lib/supabase/client';
 import { BookingActions } from '@/components/bookings/booking-actions';
 import { ParentBookingActions } from '@/components/bookings/parent-booking-actions';
 import { ReviewModal } from '@/components/reviews/review-modal';
+import { ActiveBookingTracker } from '@/components/bookings/active-booking-tracker';
+import { SitterCareTracker } from '@/components/bookings/sitter-care-tracker';
+import { BookingTimeline } from '@/components/bookings/booking-timeline';
 
 export default function BookingsPage() {
   const searchParams = useSearchParams();
@@ -118,6 +121,17 @@ export default function BookingsPage() {
             status,
             start_time,
             end_time,
+            scheduled_start,
+            scheduled_end,
+            actual_start,
+            actual_end,
+            care_status,
+            extension_minutes,
+            late_pickup_minutes,
+            late_pickup_status,
+            parent_eta_note,
+            parent_eta_time,
+            authorized_pickup_person,
             total,
             hourly_rate,
             pickup_required,
@@ -794,6 +808,62 @@ export default function BookingsPage() {
                       </div>
                     )}
 
+                    {/* Parent completed booking action (Rate Sitter & Review) */}
+                    {!isSitter && booking.status === 'completed' && (
+                      <div className="pt-3 border-t border-stone-100">
+                        <ParentBookingActions
+                          bookingId={booking.id}
+                          bookingStatus="completed"
+                          sitterId={booking.sitter_id}
+                          sitterName={booking.sitter?.display_name || 'Caregiver'}
+                          sitterAvatar={booking.sitter?.avatar_url}
+                        />
+                      </div>
+                    )}
+
+                    {/* Active Booking Countdown & Extension Tracker */}
+                    {(booking.status === 'in_progress' || booking.status === 'accepted') && (
+                      <div className="pt-3 border-t border-stone-100">
+                        <ActiveBookingTracker
+                          booking={booking}
+                          userRole={isSitter ? 'sitter' : 'parent'}
+                          onUpdate={async () => {
+                            const { data: updated } = await supabase
+                              .from('bookings')
+                              .select(`
+                                id, status, start_time, end_time, scheduled_start, scheduled_end, actual_start, actual_end, care_status, extension_minutes, late_pickup_minutes, late_pickup_status, parent_eta_note, parent_eta_time, authorized_pickup_person, total, hourly_rate, pickup_required, parent_id, sitter_id,
+                                sitter:profiles!bookings_sitter_id_fkey (display_name, avatar_url),
+                                parent:profiles!bookings_parent_id_fkey (display_name, avatar_url, phone),
+                                reviews (id)
+                              `)
+                              .order('start_time', { ascending: false });
+                            setBookings(updated || []);
+                          }}
+                        />
+                      </div>
+                    )}
+
+                    {/* Sitter Care Control Tracker */}
+                    {isSitter && (booking.status === 'in_progress' || booking.status === 'accepted') && (
+                      <div className="pt-3 border-t border-stone-100">
+                        <SitterCareTracker
+                          booking={booking}
+                          onUpdate={async () => {
+                            const { data: updated } = await supabase
+                              .from('bookings')
+                              .select(`
+                                id, status, start_time, end_time, scheduled_start, scheduled_end, actual_start, actual_end, care_status, extension_minutes, late_pickup_minutes, late_pickup_status, parent_eta_note, parent_eta_time, authorized_pickup_person, total, hourly_rate, pickup_required, parent_id, sitter_id,
+                                sitter:profiles!bookings_sitter_id_fkey (display_name, avatar_url),
+                                parent:profiles!bookings_parent_id_fkey (display_name, avatar_url, phone),
+                                reviews (id)
+                              `)
+                              .order('start_time', { ascending: false });
+                            setBookings(updated || []);
+                          }}
+                        />
+                      </div>
+                    )}
+
                     {/* Sitter Check-in / Check-out actions */}
                     {isSitter && booking.status === 'accepted' && (
                       <div className="pt-3 border-t border-stone-100 flex">
@@ -809,7 +879,7 @@ export default function BookingsPage() {
                       <div className="pt-3 border-t border-stone-100 flex">
                         <button
                           onClick={() => handleUpdateStatus(booking.id, 'completed')}
-                          className="flex-1 py-2.5 bg-orange-650 hover:bg-orange-700 text-white text-xs font-bold rounded-xl active-press transition-colors"
+                          className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl active-press transition-colors shadow-sm"
                         >
                           Check Out Child (Pick-up)
                         </button>
@@ -818,30 +888,37 @@ export default function BookingsPage() {
 
                     {/* Carefeed and Review buttons */}
                     {booking.status !== 'pending' && booking.status !== 'cancelled' && booking.status !== 'declined' && (
-                      <div className="pt-3 border-t border-stone-100 flex gap-2">
-                        <Link
-                          href={`/bookings/${booking.id}/carefeed`}
-                          className="flex-1 py-2.5 text-center rounded-xl bg-stone-50 border border-stone-150 hover:bg-stone-100 text-xs font-bold text-stone-700 active-press transition-colors"
-                        >
-                          View Carefeed
-                        </Link>
-                        {!isSitter && booking.status === 'completed' && (!booking.reviews || booking.reviews.length === 0) && (
-                          <button
-                            onClick={() => setSelectedReviewBooking({
-                              id: booking.id,
-                              sitterId: booking.sitter_id,
-                              name: booking.sitter?.display_name || 'Sitter'
-                            })}
-                            className="flex-1 py-2.5 text-center rounded-xl bg-primary text-white hover:bg-emerald-800 text-xs font-bold active-press transition-colors flex items-center justify-center gap-1.5"
+                      <div className="pt-3 border-t border-stone-100 space-y-3">
+                        <div className="flex gap-2">
+                          <Link
+                            href={`/bookings/${booking.id}/carefeed`}
+                            className="flex-1 py-2.5 text-center rounded-xl bg-stone-50 border border-stone-150 hover:bg-stone-100 text-xs font-bold text-stone-700 active-press transition-colors"
                           >
-                            <Star className="h-3.5 w-3.5 fill-amber-300 text-amber-300" /> Leave a Review
-                          </button>
-                        )}
-                        {!isSitter && booking.status === 'completed' && (booking.reviews && booking.reviews.length > 0) && (
-                          <span className="flex-1 py-2.5 text-center rounded-xl bg-amber-50 text-amber-700 border border-amber-200 text-xs font-bold flex items-center justify-center gap-1.5">
-                            <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500" /> Reviewed
-                          </span>
-                        )}
+                            View Carefeed
+                          </Link>
+                          {!isSitter && booking.status === 'completed' && (!booking.reviews || booking.reviews.length === 0) && (
+                            <button
+                              onClick={() => setSelectedReviewBooking({
+                                id: booking.id,
+                                sitterId: booking.sitter_id,
+                                name: booking.sitter?.display_name || 'Sitter'
+                              })}
+                              className="flex-1 py-2.5 text-center rounded-xl bg-primary text-white hover:bg-emerald-800 text-xs font-bold active-press transition-colors flex items-center justify-center gap-1.5"
+                            >
+                              <Star className="h-3.5 w-3.5 fill-amber-300 text-amber-300" /> Leave a Review
+                            </button>
+                          )}
+                          {!isSitter && booking.status === 'completed' && (booking.reviews && booking.reviews.length > 0) && (
+                            <span className="flex-1 py-2.5 text-center rounded-xl bg-amber-50 text-amber-700 border border-amber-200 text-xs font-bold flex items-center justify-center gap-1.5">
+                              <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500" /> Reviewed
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Audit Timeline */}
+                        <div className="pt-2 border-t border-stone-100">
+                          <BookingTimeline bookingId={booking.id} />
+                        </div>
                       </div>
                     )}
                   </div>
@@ -854,6 +931,7 @@ export default function BookingsPage() {
       {/* Review Modal Trigger */}
       {selectedReviewBooking && (
         <ReviewModal
+          isOpen={!!selectedReviewBooking}
           bookingId={selectedReviewBooking.id}
           sitterId={selectedReviewBooking.sitterId}
           sitterName={selectedReviewBooking.name}

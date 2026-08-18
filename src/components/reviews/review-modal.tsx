@@ -1,36 +1,56 @@
 'use client';
 
 import { useState } from 'react';
-import { Star, X, Loader2, AlertCircle } from 'lucide-react';
-import { createClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
+import { Star, X, ShieldCheck, Heart, Loader2, Sparkles } from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
 
 interface ReviewModalProps {
+  isOpen: boolean;
+  onClose: () => void;
   bookingId: string;
   sitterId: string;
   sitterName: string;
-  onClose: () => void;
-  onSuccess: () => void;
+  sitterAvatar?: string;
+  onSuccess?: () => void;
 }
 
-export function ReviewModal({ bookingId, sitterId, sitterName, onClose, onSuccess }: ReviewModalProps) {
+export function ReviewModal({
+  isOpen,
+  onClose,
+  bookingId,
+  sitterId,
+  sitterName,
+  sitterAvatar,
+  onSuccess
+}: ReviewModalProps) {
   const supabase = createClient();
+
   const [rating, setRating] = useState<number>(5);
-  const [hoverRating, setHoverRating] = useState<number | null>(null);
-  const [comment, setComment] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [hoverRating, setHoverRating] = useState<number>(0);
+  const [comment, setComment] = useState<string>('');
+  const [submitting, setSubmitting] = useState<boolean>(false);
+
+  if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitting(true);
-    setError(null);
+    if (!rating || rating < 1 || rating > 5) {
+      toast.error('Please select a star rating between 1 and 5.');
+      return;
+    }
 
     try {
+      setSubmitting(true);
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('You must be logged in to leave a review.');
 
-      const { error: insertErr } = await supabase
+      if (!user) {
+        toast.error('You must be signed in to submit a review.');
+        return;
+      }
+
+      // Insert review into Supabase
+      const { error } = await supabase
         .from('reviews')
         .insert({
           booking_id: bookingId,
@@ -40,117 +60,145 @@ export function ReviewModal({ bookingId, sitterId, sitterName, onClose, onSucces
           comment: comment.trim() || null,
         });
 
-      if (insertErr) throw insertErr;
-
-      toast.success('Thank you! Your review has been published.');
-      onSuccess();
-    } catch (err: any) {
-      if (err.code === '23505') {
-        const msg = 'You have already submitted a review for this booking.';
-        setError(msg);
-        toast.error(msg);
-      } else {
-        const msg = err.message || 'Failed to submit review. Try again.';
-        setError(msg);
-        toast.error(msg);
+      if (error) {
+        if (error.code === '23505') {
+          toast.error('You have already submitted a review for this booking.');
+        } else {
+          throw error;
+        }
+        return;
       }
+
+      toast.success('Thank you! Your verified review has been published.');
+      if (onSuccess) onSuccess();
+      onClose();
+    } catch (err: any) {
+      console.error('Error submitting review:', err);
+      toast.error(err.message || 'Failed to publish review.');
     } finally {
       setSubmitting(false);
     }
   };
 
+  const getRatingLabel = (val: number) => {
+    switch (val) {
+      case 5: return '⭐⭐⭐⭐⭐ Exceptional Care!';
+      case 4: return '⭐⭐⭐⭐ Great Experience!';
+      case 3: return '⭐⭐⭐ Good Service';
+      case 2: return '⭐⭐ Fair Care';
+      case 1: return '⭐ Unsatisfactory';
+      default: return 'Select your rating';
+    }
+  };
+
+  const currentDisplayRating = hoverRating || rating;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-sm animate-fade-in">
-      <div className="relative w-full max-w-md bg-white border border-stone-200 rounded-3xl p-6 shadow-xl space-y-6">
-        
-        {/* Header */}
-        <div className="flex justify-between items-start">
-          <div>
-            <h3 className="font-display text-base font-black text-heading">Rate Sitter</h3>
-            <p className="text-xs text-stone-400 mt-1">Share your experience with {sitterName}.</p>
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+      <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 max-w-md w-full space-y-6 shadow-2xl relative">
+        {/* Modal Header */}
+        <div className="flex items-center justify-between border-b border-stone-100 dark:border-slate-800 pb-4">
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-amber-50 dark:bg-amber-950/40 rounded-xl text-amber-500">
+              <Star className="h-5 w-5 fill-current" />
+            </div>
+            <div>
+              <h3 className="font-display text-lg font-black text-heading dark:text-white">Rate Your Caregiver</h3>
+              <p className="text-[10px] text-stone-400 font-medium">Verified Parent Booking Review</p>
+            </div>
           </div>
-          <button 
+          <button
             onClick={onClose}
-            className="p-1.5 hover:bg-stone-100 rounded-xl text-stone-400 hover:text-stone-700 transition-colors"
+            className="p-1.5 rounded-xl hover:bg-stone-100 dark:hover:bg-slate-800 text-stone-400 transition-colors"
           >
-            <X className="h-5 w-5" />
+            <X className="h-4 w-4" />
           </button>
         </div>
 
-        {/* Error message */}
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-2xl text-xs flex gap-2">
-            <AlertCircle className="h-4 w-4 shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
-
-        {/* Review Form */}
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Rating Stars Selector */}
-          <div className="flex flex-col items-center gap-2">
-            <label className="text-[10px] font-bold text-stone-400 uppercase tracking-wider">Your Rating</label>
-            <div className="flex gap-1.5">
-              {[1, 2, 3, 4, 5].map((starValue) => {
-                const isLit = hoverRating !== null ? starValue <= hoverRating : starValue <= rating;
-                return (
-                  <button
-                    key={starValue}
-                    type="button"
-                    onClick={() => setRating(starValue)}
-                    onMouseEnter={() => setHoverRating(starValue)}
-                    onMouseLeave={() => setHoverRating(null)}
-                    className="p-1 text-stone-300 hover:scale-110 active:scale-95 transition-all outline-none"
-                  >
-                    <Star 
-                      className={`h-9 w-9 stroke-amber-400 ${
-                        isLit ? 'text-amber-400 fill-amber-400' : 'text-stone-250 fill-none'
-                      }`} 
-                    />
-                  </button>
-                );
-              })}
-            </div>
-            <span className="text-xs font-bold text-amber-600 uppercase tracking-wider mt-1">
-              {rating === 5 ? 'Excellent!' : rating === 4 ? 'Good' : rating === 3 ? 'Average' : rating === 2 ? 'Disappointing' : 'Very Poor'}
+        {/* Sitter Info Header */}
+        <div className="flex items-center gap-3.5 p-3.5 bg-stone-50 dark:bg-slate-800/60 rounded-2xl border border-stone-150 dark:border-slate-700">
+          <img
+            src={sitterAvatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100'}
+            alt={sitterName}
+            className="w-11 h-11 rounded-xl object-cover border border-stone-200 dark:border-slate-700"
+          />
+          <div>
+            <h4 className="font-bold text-sm text-heading dark:text-white flex items-center gap-1">
+              {sitterName}
+              <ShieldCheck className="h-4 w-4 text-primary" />
+            </h4>
+            <span className="text-[10px] text-stone-400 font-medium flex items-center gap-1">
+              <Sparkles className="h-3 w-3 text-amber-500" /> Completed Booking
             </span>
           </div>
+        </div>
 
-          {/* Comment description */}
-          <div>
-            <label className="block text-[10px] font-bold text-stone-400 uppercase mb-2">Written Review (Optional)</label>
+        {/* Interactive Star Rating Selector */}
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div className="text-center space-y-2">
+            <label className="block text-xs font-bold text-stone-400 uppercase tracking-wider">
+              {getRatingLabel(currentDisplayRating)}
+            </label>
+            <div className="flex justify-center items-center gap-2 pt-1">
+              {[1, 2, 3, 4, 5].map((star) => (
+                <button
+                  key={star}
+                  type="button"
+                  onClick={() => setRating(star)}
+                  onMouseEnter={() => setHoverRating(star)}
+                  onMouseLeave={() => setHoverRating(0)}
+                  className="p-1 text-stone-300 dark:text-slate-700 hover-scale focus:outline-none transition-transform"
+                >
+                  <Star
+                    className={`h-8 w-8 transition-colors ${
+                      star <= currentDisplayRating
+                        ? 'text-amber-400 fill-amber-400'
+                        : 'hover:text-amber-200'
+                    }`}
+                  />
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Written Review Input */}
+          <div className="space-y-1.5">
+            <label className="block text-xs font-bold text-stone-700 dark:text-slate-300">
+              Share details of your experience (Optional)
+            </label>
             <textarea
+              rows={3}
               value={comment}
               onChange={(e) => setComment(e.target.value)}
-              rows={4}
-              placeholder="Tell other parents about the sitter's care, schedule reliability, emergency responses..."
-              className="w-full p-4 rounded-2xl border border-stone-200 text-xs bg-stone-50 outline-none focus:border-primary focus:bg-white transition-all resize-none"
+              placeholder="Was the sitter punctual, attentive, engaging, or communicative? Your feedback helps other parents in the community!"
+              className="w-full p-3.5 rounded-2xl border border-stone-200 dark:border-slate-700 bg-stone-50 dark:bg-slate-800 text-stone-900 dark:text-white text-xs placeholder:text-stone-400 focus:outline-none focus:border-primary transition-colors"
             />
           </div>
 
-          {/* Action buttons */}
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 py-3.5 border border-stone-200 text-stone-700 text-xs font-bold rounded-2xl active-press hover:bg-stone-50 transition-colors"
-            >
-              Cancel
-            </button>
+          {/* Submit Controls */}
+          <div className="flex gap-3 pt-2">
             <button
               type="submit"
               disabled={submitting}
-              className="flex-1 py-3.5 bg-primary text-white text-xs font-bold rounded-2xl active-press hover:bg-emerald-800 disabled:opacity-50 transition-colors flex justify-center items-center gap-1.5"
+              className="flex-1 py-3.5 bg-primary text-white rounded-2xl text-xs font-bold active-press hover:bg-emerald-800 transition-colors flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
             >
               {submitting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Publishing Review...
+                </>
               ) : (
-                'Submit Review'
+                'Submit Verified Review'
               )}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-5 py-3.5 border border-stone-200 dark:border-slate-800 text-stone-700 dark:text-slate-300 rounded-2xl text-xs font-bold hover:bg-stone-50 dark:hover:bg-slate-800 active-press"
+            >
+              Cancel
             </button>
           </div>
         </form>
-
       </div>
     </div>
   );

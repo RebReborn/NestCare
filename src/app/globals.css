@@ -47,12 +47,15 @@ body {
    Dark Mode Explicit Component Overrides
    ============================================================ */
 
+.dark body,
+.dark main {
+  background-color: #0f172a !important;
+  color: #f8fafc !important;
+}
+
 /* Top Header Bar */
-.dark header,
-.dark .bg-white\/80,
-.dark .bg-white\/90,
-.dark .bg-white\/70 {
-  background-color: rgba(15, 23, 42, 0.85) !important;
+.dark header {
+  background-color: rgba(15, 23, 42, 0.9) !important;
   border-color: #334155 !important;
   color: #f8fafc !important;
 }
@@ -64,49 +67,141 @@ body {
   border-color: #1e293b !important;
 }
 
-/* Cards, Inputs, Modals */
-.dark .bg-white {
+/* Cards, Modals, White Elements & Opacity Variants */
+.dark .bg-white,
+.dark .bg-white\/95,
+.dark .bg-white\/90,
+.dark .bg-white\/80,
+.dark .bg-white\/70,
+.dark .bg-white\/60,
+.dark .bg-white\/50,
+.dark .bg-bg {
   background-color: #1e293b !important;
   color: #f8fafc !important;
 }
 
-.dark .bg-bg {
+.dark .bg-stone-50,
+.dark .bg-stone-50\/90,
+.dark .bg-stone-50\/80,
+.dark .bg-stone-50\/70,
+.dark .bg-stone-50\/60,
+.dark .bg-stone-50\/50,
+.dark .bg-stone-50\/40,
+.dark .bg-stone-50\/30,
+.dark .bg-stone-50\/70 {
   background-color: #0f172a !important;
-}
-
-.dark .bg-stone-50 {
-  background-color: #1e293b !important;
   color: #cbd5e1 !important;
 }
 
-.dark .bg-stone-100 {
+.dark .bg-stone-100,
+.dark .bg-stone-100\/90,
+.dark .bg-stone-100\/80,
+.dark .bg-stone-100\/70,
+.dark .bg-stone-100\/60,
+.dark .bg-stone-200\/60,
+.dark .bg-stone-200\/80 {
   background-color: #334155 !important;
   color: #f1f5f9 !important;
 }
 
-.dark .border-stone-200,
-.dark .border-stone-150,
-.dark .border-stone-100,
-.dark .border-stone-200\/50 {
-  border-color: #334155 !important;
-}
-
-.dark .text-heading {
+.dark .bg-stone-200 {
+  background-color: #475569 !important;
   color: #f8fafc !important;
 }
 
-.dark .text-stone-700,
+/* Borders */
+.dark .border-stone-200,
+.dark .border-stone-150,
+.dark .border-stone-100,
+.dark .border-stone-200\/80,
+.dark .border-stone-200\/60,
+.dark .border-stone-200\/50,
+.dark .border-stone-300 {
+  border-color: #334155 !important;
+}
+
+/* Text Colors */
+.dark .text-heading,
+.dark .text-stone-900,
+.dark .text-stone-800,
+.dark .text-stone-700 {
+  color: #f8fafc !important;
+}
+
+.dark .bg-heading {
+  background-color: #334155 !important;
+  color: #f8fafc !important;
+}
+
 .dark .text-stone-600,
 .dark .text-stone-500 {
   color: #cbd5e1 !important;
 }
 
-.dark .text-stone-400 {
+.dark .text-stone-400,
+.dark .text-stone-300,
+.dark .text-muted-text {
   color: #94a3b8 !important;
 }
 
-.dark .text-muted-text {
-  color: #94a3b8 !important;
+/* Inputs, Selects, Textareas */
+.dark input[type="text"],
+.dark input[type="email"],
+.dark input[type="password"],
+.dark input[type="number"],
+.dark input[type="tel"],
+.dark select,
+.dark textarea {
+  background-color: #0f172a !important;
+  border-color: #334155 !important;
+  color: #f8fafc !important;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #64748b !important;
+}
+
+/* Accent Card Overrides in Dark Mode */
+.dark .bg-emerald-50,
+.dark .bg-emerald-50\/70,
+.dark .bg-emerald-50\/80,
+.dark .bg-emerald-50\/90 {
+  background-color: rgba(6, 78, 59, 0.45) !important;
+  border-color: rgba(16, 185, 129, 0.3) !important;
+  color: #a7f3d0 !important;
+}
+
+.dark .bg-amber-50,
+.dark .bg-amber-50\/50,
+.dark .bg-amber-50\/60,
+.dark .bg-amber-50\/80 {
+  background-color: rgba(120, 53, 15, 0.45) !important;
+  border-color: rgba(245, 158, 11, 0.3) !important;
+  color: #fde68a !important;
+}
+
+.dark .bg-rose-50,
+.dark .bg-rose-50\/50,
+.dark .bg-rose-50\/60 {
+  background-color: rgba(136, 19, 55, 0.45) !important;
+  border-color: rgba(244, 63, 94, 0.3) !important;
+  color: #fecdd3 !important;
+}
+
+.dark .bg-sky-50,
+.dark .bg-sky-50\/50 {
+  background-color: rgba(12, 74, 110, 0.45) !important;
+  border-color: rgba(14, 165, 233, 0.3) !important;
+  color: #bae6fd !important;
+}
+
+/* Modals & Dropdowns Shadow in Dark Mode */
+.dark .shadow-xl,
+.dark .shadow-2xl,
+.dark .shadow-lg,
+.dark .shadow-md {
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6), 0 8px 10px -6px rgba(0, 0, 0, 0.6) !important;
 }
 
 /* Custom iOS Safe Area Utilities */

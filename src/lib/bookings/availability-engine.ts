@@ -16,6 +16,20 @@ export async function validateSitterAvailability(
   const end = new Date(endTimeStr);
   const now = new Date();
 
+  // Check for blocked relationship if user is authenticated
+  const { data: { user } } = await supabase.auth.getUser();
+  if (user && user.id !== sitterId) {
+    const { data: block } = await supabase
+      .from('user_blocks')
+      .select('id')
+      .or(`and(blocker_id.eq.${user.id},blocked_id.eq.${sitterId}),and(blocker_id.eq.${sitterId},blocked_id.eq.${user.id})`)
+      .maybeSingle();
+
+    if (block) {
+      return { success: false, error: 'Booking unavailable due to account blocking restrictions.' };
+    }
+  }
+
   // 1. Basic dates checks
   const durationMs = end.getTime() - start.getTime();
   const durationHrs = durationMs / (1000 * 60 * 60);

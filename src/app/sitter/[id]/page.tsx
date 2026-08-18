@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Star, ShieldCheck, MapPin, Calendar, BookOpen, Clock, Heart, ArrowLeft, Loader2, MessageCircle, X } from 'lucide-react';
+import { Star, ShieldCheck, MapPin, Calendar, BookOpen, Clock, Heart, ArrowLeft, Loader2, MessageCircle, X, Ban, Edit2, Video } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { toast } from 'sonner';
 
 export default function SitterProfilePage() {
   const params = useParams();
@@ -16,8 +17,36 @@ export default function SitterProfilePage() {
   const [weeklyRules, setWeeklyRules] = useState<any[]>([]);
   const [exceptions, setExceptions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState<any | null>(null);
   const [isFavorite, setIsFavorite] = useState(false);
+  const [isBlocked, setIsBlocked] = useState(false);
+  const [blocking, setBlocking] = useState(false);
   const [activeLightboxImg, setActiveLightboxImg] = useState<string | null>(null);
+
+  const handleToggleBlock = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      router.push('/login');
+      return;
+    }
+
+    try {
+      setBlocking(true);
+      if (isBlocked) {
+        await supabase.from('user_blocks').delete().eq('blocker_id', user.id).eq('blocked_id', sitterId);
+        setIsBlocked(false);
+        toast.success(`${sitter?.name || 'User'} has been unblocked.`);
+      } else {
+        await supabase.from('user_blocks').insert({ blocker_id: user.id, blocked_id: sitterId });
+        setIsBlocked(true);
+        toast.success(`${sitter?.name || 'User'} has been blocked.`);
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update block status.');
+    } finally {
+      setBlocking(false);
+    }
+  };
 
   useEffect(() => {
     async function fetchSitterData() {
@@ -42,6 +71,7 @@ export default function SitterProfilePage() {
               max_children,
               gallery_urls,
               cover_url,
+              video_intro_url,
               sitter_services (service_type),
               sitter_languages (language)
             )
@@ -66,9 +96,10 @@ export default function SitterProfilePage() {
           `)
           .eq('reviewee_id', sitterId);
 
-        // Fetch favorite status
+        // Fetch favorite and block status
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
+          setCurrentUser(user);
           const { data: fav } = await supabase
             .from('favorites')
             .select('id')
@@ -76,6 +107,14 @@ export default function SitterProfilePage() {
             .eq('sitter_id', sitterId)
             .maybeSingle();
           setIsFavorite(!!fav);
+
+          const { data: blk } = await supabase
+            .from('user_blocks')
+            .select('id')
+            .eq('blocker_id', user.id)
+            .eq('blocked_id', sitterId)
+            .maybeSingle();
+          setIsBlocked(!!blk);
         }
 
         // Fetch weekly availability rules
@@ -369,6 +408,34 @@ export default function SitterProfilePage() {
           </div>
         </div>
 
+        {/* Video Greeting / Intro Section */}
+        {sitter.video_intro_url && (
+          <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-3">
+            <div className="border-b border-stone-100 dark:border-slate-800 pb-3 flex items-center justify-between">
+              <h2 className="font-display text-sm font-black text-heading dark:text-white uppercase tracking-wider flex items-center gap-2">
+                <Video className="h-4.5 w-4.5 text-primary" /> Video Greeting & Introduction
+              </h2>
+              <span className="text-[10px] bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                Verified Caregiver
+              </span>
+            </div>
+            <div className="relative rounded-2xl overflow-hidden bg-black aspect-video border border-stone-200 dark:border-slate-800 shadow-sm">
+              <video
+                src={sitter.video_intro_url}
+                controls
+                preload="metadata"
+                poster={sitter.avatar_url}
+                className="w-full h-full object-cover"
+              >
+                Your browser does not support the video tag.
+              </video>
+            </div>
+            <p className="text-xs text-stone-500 dark:text-slate-400 font-medium italic text-center">
+              "Hi! Watch my short video greeting to learn more about my childcare experience, safety training, and activity ideas."
+            </p>
+          </div>
+        )}
+
         {/* Care Gallery Section */}
         {sitter.gallery_urls && sitter.gallery_urls.length >= 1 && (
           <div className="bg-white border border-stone-200 rounded-3xl p-6 shadow-sm space-y-4">
@@ -577,20 +644,43 @@ export default function SitterProfilePage() {
             <span className="text-xs text-stone-400 font-bold">/hr</span>
           </div>
         </div>
-        <div className="flex gap-2">
+        {currentUser?.id === sitterId ? (
           <button
-            onClick={() => router.push(`/messages?newChat=${sitter.id}`)}
-            className="p-3.5 rounded-2xl border border-stone-200 hover:bg-stone-50 hover:text-primary hover:border-primary text-stone-700 active-press transition-all"
+            onClick={() => router.push('/profile')}
+            className="flex-1 py-3.5 px-6 rounded-2xl bg-primary text-white text-xs font-bold hover:bg-emerald-800 active-press shadow-sm transition-all flex items-center justify-center gap-2"
           >
-            <MessageCircle className="h-5 w-5" />
+            <Edit2 className="h-4 w-4" /> Edit Your Caregiver Profile
           </button>
-          <button
-            onClick={() => router.push(`/bookings?bookSitter=${sitter.id}`)}
-            className="px-6 py-3.5 rounded-2xl bg-primary text-white text-xs font-bold hover:bg-emerald-800 active-press shadow-sm hover:shadow transition-all"
-          >
-            Book Sitter
-          </button>
-        </div>
+        ) : (
+          <div className="flex gap-2">
+            <button
+              onClick={handleToggleBlock}
+              disabled={blocking}
+              className={`p-3.5 rounded-2xl border transition-all ${
+                isBlocked 
+                  ? 'bg-rose-50 border-rose-200 text-rose-600 hover:bg-rose-100' 
+                  : 'border-stone-200 hover:bg-stone-50 text-stone-400 hover:text-rose-600'
+              }`}
+              title={isBlocked ? 'Unblock Sitter' : 'Block Sitter'}
+            >
+              <Ban className="h-5 w-5" />
+            </button>
+            <button
+              onClick={() => router.push(`/messages?newChat=${sitter.id}`)}
+              disabled={isBlocked}
+              className="p-3.5 rounded-2xl border border-stone-200 hover:bg-stone-50 hover:text-primary hover:border-primary text-stone-700 active-press transition-all disabled:opacity-40"
+            >
+              <MessageCircle className="h-5 w-5" />
+            </button>
+            <button
+              onClick={() => router.push(`/bookings?bookSitter=${sitter.id}`)}
+              disabled={isBlocked}
+              className="px-6 py-3.5 rounded-2xl bg-primary text-white text-xs font-bold hover:bg-emerald-800 active-press shadow-sm hover:shadow transition-all disabled:opacity-40"
+            >
+              Book Sitter
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

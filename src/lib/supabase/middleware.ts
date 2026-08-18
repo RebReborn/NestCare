@@ -6,9 +6,12 @@ export async function updateSession(request: NextRequest) {
     request,
   });
 
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder-project.supabase.co';
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseUrl,
+    supabaseAnonKey,
     {
       cookies: {
         getAll() {
@@ -29,27 +32,59 @@ export async function updateSession(request: NextRequest) {
 
   const path = request.nextUrl.pathname;
 
-  // Public routes — skip ALL auth checks and return immediately
+  // 1. Always allow system/static asset endpoints and maintenance route
   if (
-    path.startsWith('/privacy') ||
-    path.startsWith('/terms') ||
-    path.startsWith('/support') ||
-    path.startsWith('/onboarding')   // wizard handles its own auth internally
+    path.startsWith('/maintenance') ||
+    path.startsWith('/api') ||
+    path.startsWith('/_next') ||
+    path.includes('.')
   ) {
     return supabaseResponse;
   }
 
+  // 2. Fetch authenticated user
   const {
     data: { user },
     error: userErr,
   } = await supabase.auth.getUser();
 
-  console.log(`[Middleware] Path: ${path}, User: ${user?.email || 'none'}, Error: ${userErr?.message || 'none'}`);
+  // 3. Maintenance Mode Enforcement Check
+  // Allows admins and /admin routes to continue uninterrupted
+  if (!path.startsWith('/admin')) {
+    const { data: settings } = await supabase
+      .from('platform_settings')
+      .select('is_maintenance_mode')
+      .limit(1)
+      .maybeSingle();
 
-  // Public routes — always accessible without authentication
+    if (settings?.is_maintenance_mode) {
+      let isAdmin = false;
+      if (user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (profile?.role === 'admin') {
+          isAdmin = true;
+        }
+      }
+
+      if (!isAdmin) {
+        console.log(`[Middleware] Redirecting non-admin user from ${path} to /maintenance due to active maintenance mode`);
+        const url = request.nextUrl.clone();
+        url.pathname = '/maintenance';
+        return NextResponse.redirect(url);
+      }
+    }
+  }
+
+  // 4. Public legal/support routes — accessible without auth
   const isPublicRoute = path.startsWith('/privacy') ||
                         path.startsWith('/terms') ||
-                        path.startsWith('/support');
+                        path.startsWith('/support') ||
+                        path.startsWith('/onboarding');
 
   const isProtectedRoute = !isPublicRoute && (
     path.startsWith('/dashboard') || 
@@ -59,7 +94,8 @@ export async function updateSession(request: NextRequest) {
     path.startsWith('/profile') ||
     path.startsWith('/settings') ||
     path.startsWith('/availability') ||
-    path.startsWith('/notifications')
+    path.startsWith('/notifications') ||
+    path.startsWith('/transactions')
   );
 
   const isAdminRoute = path.startsWith('/admin');
@@ -89,21 +125,17 @@ export async function updateSession(request: NextRequest) {
 
   const isAuthRoute = path.startsWith('/login') || path.startsWith('/register') || path.startsWith('/forgot-password');
   if (user && isAuthRoute) {
-    const { data: profile, error: profErr } = await supabase
+    const { data: profile } = await supabase
       .from('profiles')
       .select('role')
       .eq('id', user.id)
       .maybeSingle();
-
-    console.log(`[Middleware] Auth Route check: Profile: ${JSON.stringify(profile)}, Error: ${profErr?.message || 'none'}`);
 
     if (profile) {
       console.log(`[Middleware] Redirecting authenticated user ${user.email} from auth route ${path} to /dashboard`);
       const url = request.nextUrl.clone();
       url.pathname = '/dashboard';
       return NextResponse.redirect(url);
-    } else {
-      console.log(`[Middleware] User exists but has no profile row. Allowing to stay on ${path}`);
     }
   }
 
