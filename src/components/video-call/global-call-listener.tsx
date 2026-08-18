@@ -18,15 +18,17 @@ export function GlobalCallListener() {
   } | null>(null);
 
   useEffect(() => {
-    let callChannel: any = null;
+    let broadcastChannel: any = null;
+    let dbChannel: any = null;
 
     async function initUserCallListener() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       setCurrentUser(user);
 
-      // Single unified Realtime channel for both WebSockets & DB notifications
-      callChannel = supabase.channel(`global_user_calls_${user.id}`)
+      // 1. Dedicated WebSocket Broadcast Channel
+      broadcastChannel = supabase
+        .channel(`call_broadcast_${user.id}`)
         .on('broadcast', { event: 'call_invite' }, ({ payload }) => {
           console.log('[Global Call Listener] Incoming broadcast signal received:', payload);
           if (payload?.callerId && payload.callerId !== user.id) {
@@ -44,6 +46,11 @@ export function GlobalCallListener() {
           console.log('[Global Call Listener] Call cancelled by caller');
           setIncomingCall(null);
         })
+        .subscribe();
+
+      // 2. Dedicated PostgreSQL DB Notification Changes Channel
+      dbChannel = supabase
+        .channel(`call_db_${user.id}`)
         .on(
           'postgres_changes',
           {
@@ -80,9 +87,8 @@ export function GlobalCallListener() {
     initUserCallListener();
 
     return () => {
-      if (callChannel) {
-        supabase.removeChannel(callChannel);
-      }
+      if (broadcastChannel) supabase.removeChannel(broadcastChannel);
+      if (dbChannel) supabase.removeChannel(dbChannel);
     };
   }, []);
 

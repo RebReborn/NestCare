@@ -217,7 +217,7 @@ export default function VideoCallModal({
               });
 
               // Also broadcast directly to partner's personal user channel
-              const partnerChannel = supabase.channel(`global_user_calls_${partnerId}`);
+              const partnerChannel = supabase.channel(`call_broadcast_${partnerId}`);
               partnerChannel.subscribe((st) => {
                 if (st === 'SUBSCRIBED') {
                   partnerChannel.send({
@@ -272,7 +272,7 @@ export default function VideoCallModal({
           payload: { from: currentUser.id },
         });
       }
-      const partnerChannel = supabase.channel(`global_user_calls_${partnerId}`);
+      const partnerChannel = supabase.channel(`call_broadcast_${partnerId}`);
       partnerChannel.subscribe((st) => {
         if (st === 'SUBSCRIBED') {
           partnerChannel.send({
@@ -336,7 +336,7 @@ export default function VideoCallModal({
     }
 
     if (!isIncoming && partnerId) {
-      const partnerChannel = supabase.channel(`global_user_calls_${partnerId}`);
+      const partnerChannel = supabase.channel(`call_broadcast_${partnerId}`);
       partnerChannel.subscribe((st) => {
         if (st === 'SUBSCRIBED') {
           partnerChannel.send({
