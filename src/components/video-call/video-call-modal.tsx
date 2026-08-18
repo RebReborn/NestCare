@@ -328,14 +328,27 @@ export default function VideoCallModal({
           sender_id: currentUser.id,
           message_type: 'call_summary',
           content: callLabel,
-        }).then(() => {});
+        }).select('id').single().then(({ data: newMsg }) => {
+          if (newMsg) {
+            supabase.from('message_reads').upsert([
+              { message_id: newMsg.id, user_id: currentUser.id },
+              { message_id: newMsg.id, user_id: partnerId }
+            ], { onConflict: 'message_id,user_id' }).then(() => {});
+          }
+        });
       } else {
         supabase.from('messages').insert({
           conversation_id: conversationId,
           sender_id: currentUser.id,
           message_type: 'missed_call',
           content: callMode === 'video' ? 'Missed Video Call' : 'Missed Audio Call',
-        }).then(() => {});
+        }).select('id').single().then(({ data: newMsg }) => {
+          if (newMsg) {
+            supabase.from('message_reads').upsert([
+              { message_id: newMsg.id, user_id: currentUser.id }
+            ], { onConflict: 'message_id,user_id' }).then(() => {});
+          }
+        });
       }
     }
 

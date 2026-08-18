@@ -456,10 +456,10 @@ export default function MessagesPage() {
         // Insert read receipt if message is from partner
         if (payload.new.sender_id !== currentUser.id) {
           try {
-            await supabase.from('message_reads').insert({
+            await supabase.from('message_reads').upsert({
               message_id: payload.new.id,
               user_id: currentUser.id
-            });
+            }, { onConflict: 'message_id,user_id' });
           } catch (e) {}
         }
       })
@@ -467,6 +467,16 @@ export default function MessagesPage() {
 
     return () => { supabase.removeChannel(dbChannel); };
   }, [activeConv, currentUser]);
+
+  // Auto-scroll to bottom of conversation thread when messages update
+  useEffect(() => {
+    if (!loadingMessages && messages.length > 0) {
+      const timer = setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+      }, 60);
+      return () => clearTimeout(timer);
+    }
+  }, [messages.length, activeConv?.id, loadingMessages]);
 
   // Handle Attachment Selection (Image or PDF Document)
   const handleAttachmentSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
