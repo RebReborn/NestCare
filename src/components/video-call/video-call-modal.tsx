@@ -56,6 +56,8 @@ export default function VideoCallModal({
   const localStreamRef = useRef<MediaStream | null>(null);
   const channelRef = useRef<any>(null);
   const durationTimerRef = useRef<any>(null);
+  const hasConnectedRef = useRef(false);
+  const hasLoggedRef = useRef(false);
 
   // Initialize Call & WebRTC PeerConnection
   useEffect(() => {
@@ -117,6 +119,7 @@ export default function VideoCallModal({
         pc.onconnectionstatechange = () => {
           console.log('[WebRTC] Connection state:', pc.connectionState);
           if (pc.connectionState === 'connected') {
+            hasConnectedRef.current = true;
             setCallState('connected');
             startDurationTimer();
           } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
@@ -153,6 +156,7 @@ export default function VideoCallModal({
 
             if (pcRef.current && pcRef.current.signalingState !== 'stable') {
               await pcRef.current.setRemoteDescription(new RTCSessionDescription(payload.answer));
+              hasConnectedRef.current = true;
               setCallState('connected');
               startDurationTimer();
             }
@@ -170,6 +174,10 @@ export default function VideoCallModal({
           .on('broadcast', { event: 'accept_call' }, async ({ payload }) => {
             if (payload.from === currentUser.id) return;
             console.log('[Signaling] Call accepted by partner. Creating offer...');
+            hasConnectedRef.current = true;
+            setCallState('connected');
+            startDurationTimer();
+
             if (pcRef.current) {
               const offer = await pcRef.current.createOffer();
               await pcRef.current.setLocalDescription(offer);
@@ -244,7 +252,9 @@ export default function VideoCallModal({
   };
 
   const handleAcceptCall = async () => {
-    setCallState('calling');
+    hasConnectedRef.current = true;
+    setCallState('connected');
+    startDurationTimer();
     if (channelRef.current) {
       channelRef.current.send({
         type: 'broadcast',
@@ -266,13 +276,30 @@ export default function VideoCallModal({
   };
 
   const handleEndCall = () => {
-    if (!isIncoming && (callState === 'calling' || callState === 'incoming')) {
-      supabase.from('messages').insert({
-        conversation_id: conversationId,
-        sender_id: currentUser.id,
-        message_type: 'missed_call',
-        content: callMode === 'video' ? '📹 Missed Video Call' : '📞 Missed Audio Call',
-      }).then(() => {});
+    if (hasLoggedRef.current) return;
+    hasLoggedRef.current = true;
+
+    if (!isIncoming) {
+      if (hasConnectedRef.current || callState === 'connected') {
+        const mins = Math.floor(callDuration / 60);
+        const secs = callDuration % 60;
+        const durStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+        const callLabel = callMode === 'video' ? `📹 Video Call (${durStr})` : `📞 Audio Call (${durStr})`;
+
+        supabase.from('messages').insert({
+          conversation_id: conversationId,
+          sender_id: currentUser.id,
+          message_type: 'call_summary',
+          content: callLabel,
+        }).then(() => {});
+      } else {
+        supabase.from('messages').insert({
+          conversation_id: conversationId,
+          sender_id: currentUser.id,
+          message_type: 'missed_call',
+          content: callMode === 'video' ? '📹 Missed Video Call' : '📞 Missed Audio Call',
+        }).then(() => {});
+      }
     }
 
     setCallState('ended');
