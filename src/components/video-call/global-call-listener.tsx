@@ -26,9 +26,24 @@ export function GlobalCallListener() {
       if (!user) return;
       setCurrentUser(user);
 
+      const broadcastTopic = `call_broadcast_${user.id}`;
+      const dbTopic = `call_db_${user.id}`;
+
+      // Safely remove any pre-existing channel instances to prevent React StrictMode re-subscription errors
+      try {
+        const existingChannels = supabase.getChannels();
+        existingChannels.forEach((ch: any) => {
+          if (ch.topic === `realtime:${broadcastTopic}` || ch.topic === `realtime:${dbTopic}`) {
+            supabase.removeChannel(ch);
+          }
+        });
+      } catch (e) {
+        console.warn('[Global Call Listener] Channel cleanup error:', e);
+      }
+
       // 1. Dedicated WebSocket Broadcast Channel
       broadcastChannel = supabase
-        .channel(`call_broadcast_${user.id}`)
+        .channel(broadcastTopic)
         .on('broadcast', { event: 'call_invite' }, ({ payload }) => {
           console.log('[Global Call Listener] Incoming broadcast signal received:', payload);
           if (payload?.callerId && payload.callerId !== user.id) {
@@ -50,7 +65,7 @@ export function GlobalCallListener() {
 
       // 2. Dedicated PostgreSQL DB Notification Changes Channel
       dbChannel = supabase
-        .channel(`call_db_${user.id}`)
+        .channel(dbTopic)
         .on(
           'postgres_changes',
           {
