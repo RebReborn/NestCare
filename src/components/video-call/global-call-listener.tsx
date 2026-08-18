@@ -18,18 +18,18 @@ export function GlobalCallListener() {
   } | null>(null);
 
   useEffect(() => {
+    let callChannel: any = null;
+
     async function initUserCallListener() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       setCurrentUser(user);
 
-      // 1. Subscribe to Realtime WebSocket channel for incoming calls
-      const callChannel = supabase.channel(`user_calls_${user.id}`);
-
-      callChannel
+      // Single unified Realtime channel for both WebSockets & DB notifications
+      callChannel = supabase.channel(`global_user_calls_${user.id}`)
         .on('broadcast', { event: 'call_invite' }, ({ payload }) => {
-          console.log('[Global Call Listener] Incoming call signal received:', payload);
-          if (payload.callerId && payload.callerId !== user.id) {
+          console.log('[Global Call Listener] Incoming broadcast signal received:', payload);
+          if (payload?.callerId && payload.callerId !== user.id) {
             setIncomingCall({
               conversationId: payload.conversationId,
               partnerId: payload.callerId,
@@ -44,11 +44,6 @@ export function GlobalCallListener() {
           console.log('[Global Call Listener] Call cancelled by caller');
           setIncomingCall(null);
         })
-        .subscribe();
-
-      // 2. Subscribe to Realtime Postgres DB Changes on notifications table as reliable fallback
-      const dbNotificationChannel = supabase
-        .channel(`db_call_notifications_${user.id}`)
         .on(
           'postgres_changes',
           {
@@ -62,7 +57,7 @@ export function GlobalCallListener() {
             if (newNotif && newNotif.type === 'incoming_call') {
               try {
                 const callData = JSON.parse(newNotif.content);
-                if (callData.callerId && callData.callerId !== user.id) {
+                if (callData?.callerId && callData.callerId !== user.id) {
                   console.log('[Global Call Listener] Received DB incoming_call notification:', callData);
                   setIncomingCall({
                     conversationId: callData.conversationId,
@@ -80,14 +75,15 @@ export function GlobalCallListener() {
           }
         )
         .subscribe();
-
-      return () => {
-        supabase.removeChannel(callChannel);
-        supabase.removeChannel(dbNotificationChannel);
-      };
     }
 
     initUserCallListener();
+
+    return () => {
+      if (callChannel) {
+        supabase.removeChannel(callChannel);
+      }
+    };
   }, []);
 
   if (!incomingCall || !currentUser) return null;
