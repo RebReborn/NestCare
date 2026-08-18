@@ -1050,7 +1050,7 @@ export default function MessagesPage() {
                   }
 
                   if (msg.message_type === 'missed_call') {
-                    const cleanText = msg.content?.replace(/^[📹📞]\s*/, '') || 'Missed Video Call';
+                    const cleanText = msg.content?.replace(/^[^a-zA-Z0-9]+/, '').trim() || 'Missed Video Call';
                     return (
                       <div key={msg.id || i} className={`flex ${isOwn ? 'justify-end' : 'justify-start'} my-2`}>
                         <div className="max-w-sm bg-rose-50/90 dark:bg-slate-800 border border-rose-200 dark:border-rose-900/50 p-4 rounded-3xl shadow-2xs space-y-2.5">
@@ -1077,7 +1077,7 @@ export default function MessagesPage() {
                   }
 
                   if (msg.message_type === 'call_summary') {
-                    const cleanText = msg.content?.replace(/^[📹📞]\s*/, '') || 'Video Call';
+                    const cleanText = msg.content?.replace(/^[^a-zA-Z0-9]+/, '').trim() || 'Video Call';
                     const isAudio = msg.content?.includes('Audio') || msg.content?.includes('📞');
                     return (
                       <div key={msg.id || i} className={`flex ${isOwn ? 'justify-end' : 'justify-start'} my-2`}>
