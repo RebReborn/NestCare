@@ -72,6 +72,30 @@ export default function AdminDashboardPage() {
   const [auditDateFilter, setAuditDateFilter] = useState('all');
   const [inspectingAuditLog, setInspectingAuditLog] = useState<any | null>(null);
 
+  // Custom Compliance Reason Modal State
+  const [complianceModalOpen, setComplianceModalOpen] = useState(false);
+  const [complianceTitle, setComplianceTitle] = useState('');
+  const [complianceSubtitle, setComplianceSubtitle] = useState('');
+  const [complianceReasonInput, setComplianceReasonInput] = useState('');
+  const [complianceError, setComplianceError] = useState(false);
+  const [complianceSuggestions, setComplianceSuggestions] = useState<string[]>([]);
+  const [complianceOnSubmit, setComplianceOnSubmit] = useState<((reason: string) => void) | null>(null);
+
+  const requestComplianceReason = (
+    title: string,
+    subtitle: string,
+    suggestions: string[],
+    onSubmit: (reason: string) => void
+  ) => {
+    setComplianceTitle(title);
+    setComplianceSubtitle(subtitle);
+    setComplianceSuggestions(suggestions);
+    setComplianceReasonInput('');
+    setComplianceError(false);
+    setComplianceOnSubmit(() => onSubmit);
+    setComplianceModalOpen(true);
+  };
+
   const handleUnlockProtectedAccess = async (e: React.FormEvent) => {
     e.preventDefault();
     if (passcodeInput.trim() === '2020') {
@@ -231,49 +255,55 @@ export default function AdminDashboardPage() {
       return;
     }
 
-    const reason = window.prompt('Privacy & Compliance Policy: Enter a valid reason for inspecting this private conversation transcript (e.g. Safety Report #R-1029):');
-    if (!reason || !reason.trim()) {
-      toast.error('Transcript inspection cancelled: A valid compliance reason is required to view private user messages.');
-      return;
-    }
+    requestComplianceReason(
+      'Private Conversation Inspection Compliance',
+      'In accordance with NestCare privacy policies, accessing private user messaging transcripts requires a recorded administrative compliance reason.',
+      [
+        'User Safety Report Investigation',
+        'Off-Platform Payment Circumvention Review',
+        'Dispute Settlement Verification',
+        'Routine Compliance Audit Check'
+      ],
+      async (reason) => {
+        setInspectingConvId(convId);
+        setLoadingInspectMessages(true);
+        try {
+          await fetch('/api/admin/audit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'inspected_chat_transcript',
+              entityType: 'conversation',
+              entityId: convId,
+              details: `Admin inspected chat conversation transcript (${convId})`,
+              reason,
+              severity: 'critical',
+              result: 'success',
+              metadata: {
+                conversation_id: convId,
+                scope: 'read_only_transcript_inspection',
+                access_timestamp: new Date().toISOString(),
+              },
+            }),
+          }).catch(e => console.warn('[Audit Log API]', e));
 
-    setInspectingConvId(convId);
-    setLoadingInspectMessages(true);
-    try {
-      await fetch('/api/admin/audit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'inspected_chat_transcript',
-          entityType: 'conversation',
-          entityId: convId,
-          details: `Admin inspected chat conversation transcript (${convId})`,
-          reason,
-          severity: 'critical',
-          result: 'success',
-          metadata: {
-            conversation_id: convId,
-            scope: 'read_only_transcript_inspection',
-            access_timestamp: new Date().toISOString(),
-          },
-        }),
-      }).catch(e => console.warn('[Audit Log API]', e));
+          const { data: msgs, error } = await supabase
+            .from('messages')
+            .select('*, sender:profiles(id, display_name, avatar_url, role)')
+            .eq('conversation_id', convId)
+            .order('created_at', { ascending: true });
 
-      const { data: msgs, error } = await supabase
-        .from('messages')
-        .select('*, sender:profiles(id, display_name, avatar_url, role)')
-        .eq('conversation_id', convId)
-        .order('created_at', { ascending: true });
-
-      if (error) throw error;
-      setInspectingMessages(msgs || []);
-      loadAdminData(true);
-    } catch (err: any) {
-      console.error('Error fetching chat transcript:', err);
-      toast.error(err.message || 'Could not load conversation transcript.');
-    } finally {
-      setLoadingInspectMessages(false);
-    }
+          if (error) throw error;
+          setInspectingMessages(msgs || []);
+          loadAdminData(true);
+        } catch (err: any) {
+          console.error('Error fetching chat transcript:', err);
+          toast.error(err.message || 'Could not load conversation transcript.');
+        } finally {
+          setLoadingInspectMessages(false);
+        }
+      }
+    );
   };
 
   const handleResolveMessageReport = async (reportId: string, status: 'resolved' | 'dismissed') => {
@@ -573,70 +603,76 @@ export default function AdminDashboardPage() {
   const handleUpdatePricing = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const reason = window.prompt('Administrative Security Policy: Enter a valid reason for updating financial rules & split-fee percentages:');
-    if (!reason || !reason.trim()) {
-      toast.error('Financial rule change cancelled: A valid reason is required for critical financial modifications.');
-      return;
-    }
+    requestComplianceReason(
+      'Platform Financial Rule Modification',
+      'Modifying platform split-fee percentages, commission rates, or tax parameters directly impacts user payouts and checkout totals. An administrative reason is required for compliance audit logging.',
+      [
+        'Quarterly Financial Policy Adjustment',
+        'Stripe Connect Merchant Fee Alignment',
+        'Promotional Fee Discount Policy Update',
+        'Regional Tax Parameter Calibration'
+      ],
+      async (reason) => {
+        try {
+          setUpdatingConfig(true);
 
-    try {
-      setUpdatingConfig(true);
+          const beforeState = pricingConfig ? {
+            parentFeePct: pricingConfig.parent_fee_percentage,
+            sitterCommPct: pricingConfig.sitter_commission_percentage,
+            minFee: pricingConfig.min_platform_fee_cents ? pricingConfig.min_platform_fee_cents / 100 : minFee,
+            maxFee: pricingConfig.max_platform_fee_cents ? pricingConfig.max_platform_fee_cents / 100 : maxFee,
+            taxPct: pricingConfig.tax_percentage,
+          } : { parentFeePct, sitterCommPct, minFee, maxFee, taxPct };
 
-      const beforeState = pricingConfig ? {
-        parentFeePct: pricingConfig.parent_fee_percentage,
-        sitterCommPct: pricingConfig.sitter_commission_percentage,
-        minFee: pricingConfig.min_platform_fee_cents ? pricingConfig.min_platform_fee_cents / 100 : minFee,
-        maxFee: pricingConfig.max_platform_fee_cents ? pricingConfig.max_platform_fee_cents / 100 : maxFee,
-        taxPct: pricingConfig.tax_percentage,
-      } : { parentFeePct, sitterCommPct, minFee, maxFee, taxPct };
+          const afterState = { parentFeePct, sitterCommPct, minFee, maxFee, taxPct };
 
-      const afterState = { parentFeePct, sitterCommPct, minFee, maxFee, taxPct };
+          const res = await fetch('/api/admin/pricing', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              parentFeePct,
+              sitterCommPct,
+              minFee,
+              maxFee,
+              taxPct,
+            }),
+          });
 
-      const res = await fetch('/api/admin/pricing', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          parentFeePct,
-          sitterCommPct,
-          minFee,
-          maxFee,
-          taxPct,
-        }),
-      });
+          const resData = await res.json();
+          if (!res.ok) throw new Error(resData.error || 'Failed to update pricing rules.');
 
-      const resData = await res.json();
-      if (!res.ok) throw new Error(resData.error || 'Failed to update pricing rules.');
+          if (resData.pricing) {
+            setPricingConfig(resData.pricing);
+            setPlatformPct(Number(resData.pricing.platform_percentage || (parentFeePct + sitterCommPct)));
+          }
 
-      if (resData.pricing) {
-        setPricingConfig(resData.pricing);
-        setPlatformPct(Number(resData.pricing.platform_percentage || (parentFeePct + sitterCommPct)));
+          // Record critical audit log with immutable before/after state diff and reason
+          await fetch('/api/admin/audit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'updated_financial_rules',
+              entityType: 'pricing_config',
+              details: `Updated platform financial parameters (Parent Fee: ${parentFeePct}%, Sitter Comm: ${sitterCommPct}%, Tax: ${taxPct}%).`,
+              reason,
+              severity: 'critical',
+              result: 'success',
+              metadata: {
+                before: beforeState,
+                after: afterState,
+              },
+            }),
+          });
+
+          toast.success('Platform financial parameters updated & critical audit log recorded!');
+          loadAdminData(true);
+        } catch (err: any) {
+          toast.error(err.message || 'Pricing update failed.');
+        } finally {
+          setUpdatingConfig(false);
+        }
       }
-
-      // Record critical audit log with immutable before/after state diff and reason
-      await fetch('/api/admin/audit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'updated_financial_rules',
-          entityType: 'pricing_config',
-          details: `Updated platform financial parameters (Parent Fee: ${parentFeePct}%, Sitter Comm: ${sitterCommPct}%, Tax: ${taxPct}%).`,
-          reason,
-          severity: 'critical',
-          result: 'success',
-          metadata: {
-            before: beforeState,
-            after: afterState,
-          },
-        }),
-      });
-
-      toast.success('Platform financial parameters updated & critical audit log recorded!');
-      loadAdminData(true);
-    } catch (err: any) {
-      toast.error(err.message || 'Pricing update failed.');
-    } finally {
-      setUpdatingConfig(false);
-    }
+    );
   };
 
   // Filter users
@@ -2351,6 +2387,118 @@ export default function AdminDashboardPage() {
                 Close Details
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* CUSTOM COMPLIANCE REASON MODAL */}
+      {complianceModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl space-y-6">
+            <div className="flex items-start justify-between border-b border-stone-100 dark:border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-amber-500/10 text-amber-500 rounded-2xl border border-amber-500/20 shrink-0">
+                  <ShieldAlert className="h-6 w-6 text-amber-500" />
+                </div>
+                <div>
+                  <h3 className="font-display text-base font-black text-heading dark:text-white">
+                    {complianceTitle}
+                  </h3>
+                  <span className="text-[10px] text-amber-600 dark:text-amber-400 font-bold uppercase tracking-wider block mt-0.5">
+                    Security Compliance Audit Policy
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => setComplianceModalOpen(false)}
+                className="p-1.5 text-stone-400 hover:text-stone-700 dark:hover:text-white rounded-xl"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-stone-600 dark:text-slate-300 font-medium leading-relaxed">
+              {complianceSubtitle}
+            </p>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!complianceReasonInput.trim() || complianceReasonInput.trim().length < 3) {
+                  setComplianceError(true);
+                  return;
+                }
+                const fn = complianceOnSubmit;
+                const r = complianceReasonInput.trim();
+                setComplianceModalOpen(false);
+                if (fn) fn(r);
+              }}
+              className="space-y-4"
+            >
+              <div>
+                <label className="block text-[10px] font-bold text-stone-400 dark:text-slate-400 uppercase tracking-wider mb-2">
+                  Administrative Reason / Ticket Reference <span className="text-rose-500">*</span>
+                </label>
+                <textarea
+                  rows={3}
+                  autoFocus
+                  placeholder="Enter explicit administrative reason or compliance ticket reference..."
+                  value={complianceReasonInput}
+                  onChange={(e) => {
+                    setComplianceReasonInput(e.target.value);
+                    setComplianceError(false);
+                  }}
+                  className={`w-full p-3.5 rounded-2xl border outline-none text-xs bg-stone-50 dark:bg-slate-800 text-stone-900 dark:text-slate-100 font-medium transition-colors ${
+                    complianceError
+                      ? 'border-rose-500 focus:border-rose-600'
+                      : 'border-stone-200 dark:border-slate-700 focus:border-primary'
+                  }`}
+                />
+                {complianceError && (
+                  <p className="text-[11px] text-rose-500 font-bold mt-1.5 flex items-center gap-1">
+                    <AlertCircle className="h-3.5 w-3.5" /> Please provide a valid compliance reason (at least 3 characters).
+                  </p>
+                )}
+              </div>
+
+              {/* Quick Preset Pills */}
+              {complianceSuggestions.length > 0 && (
+                <div className="space-y-1.5">
+                  <span className="text-[9px] text-stone-400 dark:text-slate-500 font-bold uppercase tracking-wider block">Quick Presets</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {complianceSuggestions.map((preset, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => {
+                          setComplianceReasonInput(preset);
+                          setComplianceError(false);
+                        }}
+                        className="px-2.5 py-1 bg-stone-100 dark:bg-slate-800 hover:bg-stone-200 dark:hover:bg-slate-700 text-stone-700 dark:text-slate-300 rounded-xl text-[10px] font-semibold transition-colors text-left"
+                      >
+                        + {preset}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-3 pt-3 border-t border-stone-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setComplianceModalOpen(false)}
+                  className="flex-1 py-3 rounded-2xl border border-stone-200 dark:border-slate-700 text-stone-600 dark:text-slate-300 text-xs font-bold hover:bg-stone-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-3 rounded-2xl bg-primary text-white text-xs font-bold hover:bg-emerald-800 active-press transition-colors shadow-md flex items-center justify-center gap-2"
+                >
+                  <Check className="h-4 w-4" /> Confirm & Log Action
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
