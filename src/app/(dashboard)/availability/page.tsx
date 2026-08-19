@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { Calendar, Clock, Plus, Trash2, Save, Loader2, CalendarRange, AlertCircle } from 'lucide-react';
+import { Calendar, Clock, Plus, Trash2, Save, Loader2, CalendarRange, AlertCircle, ShieldCheck } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
 const DAYS_OF_WEEK = [
@@ -25,7 +25,6 @@ export default function AvailabilityPage() {
   const [sitterId, setSitterId] = useState<string | null>(null);
 
   // Weekly Recurring Rules state
-  // Map of day_of_week -> { is_active: boolean, start_time: string, end_time: string }
   const [weeklyRules, setWeeklyRules] = useState<{
     [key: number]: { id?: string; is_active: boolean; start_time: string; end_time: string };
   }>({
@@ -72,7 +71,6 @@ export default function AvailabilityPage() {
           .single();
 
         if (profile?.role !== 'sitter') {
-          // Parents don't need availability settings
           router.push('/dashboard');
           return;
         }
@@ -95,7 +93,7 @@ export default function AvailabilityPage() {
             const end = rule.end_time.substring(0, 5);
             rulesMap[rule.day_of_week] = {
               id: rule.id,
-              is_active: true, // If it exists, this day is active
+              is_active: true,
               start_time: start,
               end_time: end,
             };
@@ -103,55 +101,55 @@ export default function AvailabilityPage() {
           setWeeklyRules(rulesMap);
         }
 
-        // Fetch exceptions (only future exceptions, filtered on start_date)
-        const { data: ex } = await supabase
+        // Fetch exceptions
+        const { data: exData } = await supabase
           .from('availability_exceptions')
           .select('*')
           .eq('sitter_id', user.id)
-          .gte('start_date', new Date().toISOString())
           .order('start_date', { ascending: true });
 
-        const mappedEx = (ex || []).map((e: any) => {
-          const dateOnly = e.start_date.split('T')[0];
-          const startT = e.start_date.substring(11, 16);
-          const endT = e.end_date.substring(11, 16);
-          return {
-            id: e.id,
-            sitter_id: e.sitter_id,
-            exception_type: e.exception_type,
-            exception_date: dateOnly,
-            start_time: startT,
-            end_time: endT,
-            reason: e.notes || '',
-          };
-        });
-
-        setExceptions(mappedEx);
+        if (exData) {
+          const mappedEx = exData.map((data) => {
+            const dateOnly = data.start_date.split('T')[0];
+            const startT = data.start_date.substring(11, 16);
+            const endT = data.end_date.substring(11, 16);
+            return {
+              id: data.id,
+              sitter_id: data.sitter_id,
+              exception_type: data.exception_type,
+              exception_date: dateOnly,
+              start_time: startT,
+              end_time: endT,
+              reason: data.notes || '',
+            };
+          });
+          setExceptions(mappedEx);
+        }
       } catch (err) {
-        console.error('Failed to load availability:', err);
+        console.error('Error loading availability settings:', err);
       } finally {
         setLoading(false);
       }
     }
 
     loadAvailability();
-  }, []);
+  }, [router]);
 
-  const handleRuleToggle = (day: number) => {
+  const handleRuleToggle = (dayValue: number) => {
     setWeeklyRules((prev) => ({
       ...prev,
-      [day]: {
-        ...prev[day],
-        is_active: !prev[day].is_active,
+      [dayValue]: {
+        ...prev[dayValue],
+        is_active: !prev[dayValue].is_active,
       },
     }));
   };
 
-  const handleTimeChange = (day: number, field: 'start_time' | 'end_time', value: string) => {
+  const handleTimeChange = (dayValue: number, field: 'start_time' | 'end_time', value: string) => {
     setWeeklyRules((prev) => ({
       ...prev,
-      [day]: {
-        ...prev[day],
+      [dayValue]: {
+        ...prev[dayValue],
         [field]: value,
       },
     }));
@@ -163,16 +161,13 @@ export default function AvailabilityPage() {
     try {
       setSavingRules(true);
 
-      // 1. Delete all existing recurring rules for this sitter
-      const { error: deleteErr } = await supabase
+      // Delete old rules for this sitter
+      await supabase
         .from('availability_rules')
         .delete()
         .eq('sitter_id', sitterId);
 
-      if (deleteErr) throw deleteErr;
-
-      // 2. Filter active rules
-      const activeDays = DAYS_OF_WEEK.filter(day => weeklyRules[day.value].is_active);
+      const activeDays = DAYS_OF_WEEK.filter((day) => weeklyRules[day.value].is_active);
 
       if (activeDays.length > 0) {
         const insertData = activeDays.map((day) => {
@@ -185,7 +180,6 @@ export default function AvailabilityPage() {
           };
         });
 
-        // 3. Insert active rules
         const { error: insertErr } = await supabase
           .from('availability_rules')
           .insert(insertData);
@@ -251,7 +245,6 @@ export default function AvailabilityPage() {
 
       if (error) throw error;
 
-      // Map back to layout format
       const dateOnly = data.start_date.split('T')[0];
       const startT = data.start_date.substring(11, 16);
       const endT = data.end_date.substring(11, 16);
@@ -294,36 +287,39 @@ export default function AvailabilityPage() {
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center py-20">
-        <Loader2 className="h-7 w-7 animate-spin text-primary" />
+      <div className="flex justify-center items-center py-24 text-stone-400 dark:text-slate-400">
+        <Loader2 className="h-8 w-8 animate-spin text-primary mr-2" />
+        <span className="text-xs font-bold">Loading shift schedule…</span>
       </div>
     );
   }
 
   return (
-    <div className="max-w-2xl mx-auto space-y-8">
+    <div className="max-w-3xl mx-auto space-y-8 pb-16">
       <div>
-        <h1 className="font-display text-2xl font-black text-heading">Availability Settings</h1>
-        <p className="text-xs text-stone-400 mt-1">Configure your weekly recurring shifts and block vacation dates.</p>
+        <h1 className="font-display text-2xl sm:text-3xl font-black text-heading dark:text-white">Shift & Availability Settings</h1>
+        <p className="text-xs sm:text-sm text-stone-500 dark:text-slate-400 mt-1 font-medium">Configure your weekly recurring shifts, minimum booking notice, and block off vacation dates.</p>
       </div>
 
-      {/* Weekly Recurring Availability card */}
-      <div className="bg-white border border-stone-200 rounded-3xl p-6 shadow-sm space-y-6">
+      {/* Weekly Recurring Availability Card */}
+      <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-sm dark:shadow-slate-950/50 space-y-6">
         <div>
-          <h2 className="font-display text-base font-bold text-heading flex items-center gap-2">
+          <h2 className="font-display text-base sm:text-lg font-extrabold text-heading dark:text-slate-100 flex items-center gap-2.5">
             <Clock className="h-5 w-5 text-primary" /> Weekly Recurring Shifts
           </h2>
-          <p className="text-[11px] text-stone-400 mt-1">Define which days of the week parents are allowed to book your care services.</p>
+          <p className="text-xs text-stone-500 dark:text-slate-400 mt-1 font-medium">Define which days of the week parents are allowed to book your care services.</p>
         </div>
 
-        <div className="space-y-3.5">
+        <div className="space-y-3">
           {DAYS_OF_WEEK.map((day) => {
             const rule = weeklyRules[day.value];
             return (
               <div 
                 key={day.value}
-                className={`p-4 rounded-2xl border transition-all flex flex-col md:flex-row md:items-center justify-between gap-3 ${
-                  rule.is_active ? 'bg-emerald-50/40 border-emerald-100' : 'bg-stone-50/50 border-stone-200/60'
+                className={`p-4 rounded-2xl border transition-all flex flex-col md:flex-row md:items-center justify-between gap-3.5 ${
+                  rule.is_active 
+                    ? 'bg-emerald-50/60 dark:bg-emerald-950/30 border-emerald-200/80 dark:border-emerald-900/50' 
+                    : 'bg-stone-50/70 dark:bg-slate-800/40 border-stone-200/70 dark:border-slate-800'
                 }`}
               >
                 {/* Day toggle checkbox */}
@@ -332,9 +328,11 @@ export default function AvailabilityPage() {
                     type="checkbox"
                     checked={rule.is_active}
                     onChange={() => handleRuleToggle(day.value)}
-                    className="h-4.5 w-4.5 rounded border-stone-300 text-primary focus:ring-primary accent-primary"
+                    className="h-4.5 w-4.5 rounded border-stone-300 dark:border-slate-700 text-primary focus:ring-primary accent-primary"
                   />
-                  <span className={`text-xs font-bold ${rule.is_active ? 'text-emerald-800' : 'text-stone-500'}`}>
+                  <span className={`text-xs sm:text-sm font-bold ${
+                    rule.is_active ? 'text-emerald-800 dark:text-emerald-300 font-extrabold' : 'text-stone-500 dark:text-slate-400'
+                  }`}>
                     {day.label}
                   </span>
                 </label>
@@ -342,24 +340,24 @@ export default function AvailabilityPage() {
                 {/* Time picker settings */}
                 {rule.is_active && (
                   <div className="flex items-center gap-2 text-xs">
-                    <span className="text-stone-400 font-medium">Available from</span>
+                    <span className="text-stone-500 dark:text-slate-400 font-semibold">Available from</span>
                     <input
                       type="time"
                       value={rule.start_time}
                       onChange={(e) => handleTimeChange(day.value, 'start_time', e.target.value)}
-                      className="p-1.5 rounded-lg border border-stone-200 outline-none text-xs bg-white font-medium"
+                      className="px-2.5 py-1.5 rounded-xl border border-stone-200 dark:border-slate-700 outline-none text-xs bg-white dark:bg-slate-800 text-stone-800 dark:text-slate-100 font-medium focus:border-primary transition-colors"
                     />
-                    <span className="text-stone-400 font-medium">to</span>
+                    <span className="text-stone-500 dark:text-slate-400 font-semibold">to</span>
                     <input
                       type="time"
                       value={rule.end_time}
                       onChange={(e) => handleTimeChange(day.value, 'end_time', e.target.value)}
-                      className="p-1.5 rounded-lg border border-stone-200 outline-none text-xs bg-white font-medium"
+                      className="px-2.5 py-1.5 rounded-xl border border-stone-200 dark:border-slate-700 outline-none text-xs bg-white dark:bg-slate-800 text-stone-800 dark:text-slate-100 font-medium focus:border-primary transition-colors"
                     />
                   </div>
                 )}
                 {!rule.is_active && (
-                  <span className="text-[10px] text-stone-400 italic">Unavailable / Closed</span>
+                  <span className="text-xs text-stone-400 dark:text-slate-500 italic font-medium">Unavailable / Closed</span>
                 )}
               </div>
             );
@@ -369,7 +367,7 @@ export default function AvailabilityPage() {
         <button
           onClick={handleSaveWeeklyRules}
           disabled={savingRules}
-          className="w-full py-3.5 bg-primary text-white text-xs font-bold rounded-2xl active-press hover:bg-emerald-800 disabled:opacity-50 transition-colors flex justify-center items-center gap-1.5"
+          className="w-full py-3.5 bg-primary text-white text-xs font-bold rounded-2xl active-press hover:bg-emerald-800 disabled:opacity-50 transition-colors flex justify-center items-center gap-2 shadow-sm"
         >
           {savingRules ? (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -382,35 +380,35 @@ export default function AvailabilityPage() {
       </div>
 
       {/* Booking Notice Policy Card */}
-      <div className="bg-white border border-stone-200 rounded-3xl p-6 shadow-sm space-y-5">
+      <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-sm dark:shadow-slate-950/50 space-y-5">
         <div>
-          <h2 className="font-display text-base font-bold text-heading flex items-center gap-2">
+          <h2 className="font-display text-base sm:text-lg font-extrabold text-heading dark:text-slate-100 flex items-center gap-2.5">
             <Clock className="h-5 w-5 text-primary" /> Booking Notice Policy
           </h2>
-          <p className="text-[11px] text-stone-400 mt-1">Specify how much advance warning you require before a parent can book your care services.</p>
+          <p className="text-xs text-stone-500 dark:text-slate-400 mt-1 font-medium">Specify how much advance warning you require before a parent can book your care services.</p>
         </div>
 
         <div className="space-y-4">
           <div>
-            <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Minimum notice required</label>
+            <label className="block text-[10px] font-bold text-stone-400 dark:text-slate-400 uppercase tracking-wider mb-1.5">Minimum notice required</label>
             <select
               value={minimumNoticeHours}
               onChange={(e) => setMinimumNoticeHours(Number(e.target.value))}
-              className="w-full p-3.5 rounded-2xl border border-stone-200 outline-none text-xs bg-stone-50 font-bold"
+              className="w-full p-3.5 rounded-2xl border border-stone-200 dark:border-slate-700 outline-none text-xs bg-stone-50 dark:bg-slate-800 text-stone-900 dark:text-slate-100 font-bold focus:border-primary transition-colors"
             >
-              <option value={0}>Same day (no notice required)</option>
-              <option value={2}>2 hours notice</option>
-              <option value={6}>6 hours notice</option>
-              <option value={12}>12 hours notice</option>
-              <option value={24}>24 hours (1 day) notice</option>
-              <option value={48}>48 hours (2 days) notice</option>
+              <option value={0} className="dark:bg-slate-900">Same day (no notice required)</option>
+              <option value={2} className="dark:bg-slate-900">2 hours notice</option>
+              <option value={6} className="dark:bg-slate-900">6 hours notice</option>
+              <option value={12} className="dark:bg-slate-900">12 hours notice</option>
+              <option value={24} className="dark:bg-slate-900">24 hours (1 day) notice</option>
+              <option value={48} className="dark:bg-slate-900">48 hours (2 days) notice</option>
             </select>
           </div>
 
           <button
             onClick={handleSaveNotice}
             disabled={savingNotice}
-            className="w-full py-3.5 bg-primary text-white text-xs font-bold rounded-2xl active-press hover:bg-emerald-800 disabled:opacity-50 transition-colors flex justify-center items-center gap-1.5"
+            className="w-full py-3.5 bg-primary text-white text-xs font-bold rounded-2xl active-press hover:bg-emerald-800 disabled:opacity-50 transition-colors flex justify-center items-center gap-2 shadow-sm"
           >
             {savingNotice ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -423,47 +421,48 @@ export default function AvailabilityPage() {
         </div>
       </div>
 
-      {/* Exceptions/Vacations card */}
-      <div className="bg-white border border-stone-200 rounded-3xl p-6 shadow-sm space-y-6">
+      {/* Exceptions/Vacations Card */}
+      <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-sm dark:shadow-slate-950/50 space-y-6">
         <div>
-          <h2 className="font-display text-base font-bold text-heading flex items-center gap-2">
+          <h2 className="font-display text-base sm:text-lg font-extrabold text-heading dark:text-slate-100 flex items-center gap-2.5">
             <CalendarRange className="h-5 w-5 text-primary" /> Vacation & Override Dates
           </h2>
-          <p className="text-[11px] text-stone-400 mt-1">Block off holidays or set custom times for specific days (e.g. weekend overrides).</p>
+          <p className="text-xs text-stone-500 dark:text-slate-400 mt-1 font-medium">Block off holidays or set custom times for specific days (e.g. weekend overrides).</p>
         </div>
 
         {/* Existing Exceptions List */}
-        <div className="space-y-2">
-          <h3 className="text-xs font-bold text-stone-500 uppercase tracking-wider">Upcoming overrides</h3>
+        <div className="space-y-2.5">
+          <h3 className="text-xs font-bold text-stone-500 dark:text-slate-400 uppercase tracking-wider">Upcoming overrides</h3>
           {exceptions.length === 0 ? (
-            <p className="text-xs text-stone-400 italic bg-stone-50 p-4 rounded-xl border border-stone-100">
+            <p className="text-xs text-stone-400 dark:text-slate-400 italic bg-stone-50 dark:bg-slate-800/60 p-4 rounded-2xl border border-stone-200/60 dark:border-slate-800">
               No vacation or override dates configured. You are fully open based on recurring shifts.
             </p>
           ) : (
             <div className="space-y-2">
               {exceptions.map((ex) => (
-                <div key={ex.id} className="p-3 bg-stone-50 rounded-xl border border-stone-150 flex items-center justify-between">
+                <div key={ex.id} className="p-3.5 bg-stone-50 dark:bg-slate-800/80 rounded-2xl border border-stone-200/70 dark:border-slate-700 flex items-center justify-between">
                   <div className="space-y-1">
-                    <span className="font-bold text-xs text-heading block">
+                    <span className="font-bold text-xs text-heading dark:text-slate-100 block">
                       📅 {new Date(ex.exception_date).toLocaleDateString(undefined, { timeZone: 'UTC' })}
                     </span>
                     <div className="flex items-center gap-1.5 text-[10px]">
-                      <span className={`px-1.5 py-0.5 rounded-full font-bold uppercase tracking-wider text-[8px] ${
+                      <span className={`px-2 py-0.5 rounded-full font-extrabold uppercase tracking-wider text-[9px] border ${
                         ex.exception_type === 'unavailable' 
-                          ? 'bg-red-50 text-red-600' 
-                          : 'bg-emerald-50 text-emerald-600'
+                          ? 'bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-900/60' 
+                          : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900/60'
                       }`}>
                         {ex.exception_type === 'unavailable' ? 'Unavailable' : 'Available Override'}
                       </span>
                       {ex.exception_type === 'available_override' && (
-                        <span className="text-stone-400">({ex.start_time.substring(0, 5)} - {ex.end_time.substring(0, 5)})</span>
+                        <span className="text-stone-500 dark:text-slate-400 font-semibold">({ex.start_time.substring(0, 5)} - {ex.end_time.substring(0, 5)})</span>
                       )}
-                      {ex.reason && <span className="text-stone-400 italic">• {ex.reason}</span>}
+                      {ex.reason && <span className="text-stone-400 dark:text-slate-400 italic">• {ex.reason}</span>}
                     </div>
                   </div>
                   <button
                     onClick={() => handleDeleteException(ex.id)}
-                    className="p-2 text-stone-400 hover:text-red-500 rounded-lg"
+                    className="p-2 text-stone-400 hover:text-rose-600 dark:hover:text-rose-400 rounded-xl transition-colors"
+                    title="Remove override date"
                   >
                     <Trash2 className="h-4.5 w-4.5" />
                   </button>
@@ -474,67 +473,67 @@ export default function AvailabilityPage() {
         </div>
 
         {/* Add Exception Form */}
-        <form onSubmit={handleAddException} className="border-t border-stone-100 pt-4 space-y-4">
-          <h3 className="text-xs font-bold text-stone-500 uppercase tracking-wider">Register vacation or override</h3>
+        <form onSubmit={handleAddException} className="border-t border-stone-100 dark:border-slate-800 pt-5 space-y-4">
+          <h3 className="text-xs font-bold text-stone-500 dark:text-slate-400 uppercase tracking-wider">Register vacation or override</h3>
           
-          <div className="grid grid-cols-2 gap-3 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
             <div>
-              <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Select Date</label>
+              <label className="block text-[10px] font-bold text-stone-400 dark:text-slate-400 uppercase tracking-wider mb-1">Select Date</label>
               <input
                 type="date"
                 required
                 value={exceptionDate}
                 onChange={(e) => setExceptionDate(e.target.value)}
-                className="w-full p-3.5 rounded-2xl border border-stone-200 outline-none text-xs bg-stone-50"
+                className="w-full p-3.5 rounded-2xl border border-stone-200 dark:border-slate-700 outline-none text-xs bg-stone-50 dark:bg-slate-800 text-stone-900 dark:text-slate-100 font-medium focus:border-primary transition-colors"
               />
             </div>
             <div>
-              <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Type</label>
+              <label className="block text-[10px] font-bold text-stone-400 dark:text-slate-400 uppercase tracking-wider mb-1">Type</label>
               <select
                 value={exceptionType}
                 onChange={(e) => setExceptionType(e.target.value)}
-                className="w-full p-3.5 rounded-2xl border border-stone-200 outline-none text-xs bg-stone-50 font-bold"
+                className="w-full p-3.5 rounded-2xl border border-stone-200 dark:border-slate-700 outline-none text-xs bg-stone-50 dark:bg-slate-800 text-stone-900 dark:text-slate-100 font-bold focus:border-primary transition-colors"
               >
-                <option value="unavailable">🚫 Unavailable (Block Date)</option>
-                <option value="available_override">⏰ Custom Hours Override</option>
+                <option value="unavailable" className="dark:bg-slate-900">🚫 Unavailable (Block Date)</option>
+                <option value="available_override" className="dark:bg-slate-900">⏰ Custom Hours Override</option>
               </select>
             </div>
           </div>
 
           {exceptionType === 'available_override' && (
-            <div className="flex items-center gap-2 text-xs bg-emerald-50/20 p-3 rounded-2xl border border-emerald-50">
-              <span className="text-emerald-800 font-bold">Custom Hours:</span>
+            <div className="flex flex-wrap items-center gap-2 text-xs bg-emerald-50/50 dark:bg-emerald-950/40 p-3.5 rounded-2xl border border-emerald-200/80 dark:border-emerald-900/60">
+              <span className="text-emerald-800 dark:text-emerald-300 font-bold">Custom Hours:</span>
               <input
                 type="time"
                 value={exceptionStart}
                 onChange={(e) => setExceptionStart(e.target.value)}
-                className="p-1.5 rounded-lg border border-stone-200 outline-none text-xs bg-white font-medium"
+                className="px-2.5 py-1.5 rounded-xl border border-stone-200 dark:border-slate-700 outline-none text-xs bg-white dark:bg-slate-800 text-stone-900 dark:text-slate-100 font-medium focus:border-primary transition-colors"
               />
-              <span className="text-stone-400 font-medium">to</span>
+              <span className="text-stone-500 dark:text-slate-400 font-medium">to</span>
               <input
                 type="time"
                 value={exceptionEnd}
                 onChange={(e) => setExceptionEnd(e.target.value)}
-                className="p-1.5 rounded-lg border border-stone-200 outline-none text-xs bg-white font-medium"
+                className="px-2.5 py-1.5 rounded-xl border border-stone-200 dark:border-slate-700 outline-none text-xs bg-white dark:bg-slate-800 text-stone-900 dark:text-slate-100 font-medium focus:border-primary transition-colors"
               />
             </div>
           )}
 
           <div>
-            <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Reason / Description</label>
+            <label className="block text-[10px] font-bold text-stone-400 dark:text-slate-400 uppercase tracking-wider mb-1">Reason / Description</label>
             <input
               type="text"
               placeholder="e.g. Thanksgiving Holiday, Weekend markup"
               value={exceptionReason}
               onChange={(e) => setExceptionReason(e.target.value)}
-              className="w-full p-3.5 rounded-2xl border border-stone-200 outline-none text-xs bg-stone-50"
+              className="w-full p-3.5 rounded-2xl border border-stone-200 dark:border-slate-700 outline-none text-xs bg-stone-50 dark:bg-slate-800 text-stone-900 dark:text-slate-100 font-medium placeholder:text-stone-400 dark:placeholder:text-slate-500 focus:border-primary transition-colors"
             />
           </div>
 
           <button
             type="submit"
             disabled={submittingException || !exceptionDate}
-            className="w-full py-3.5 border border-dashed border-primary text-primary hover:bg-emerald-50 text-xs font-bold rounded-2xl active-press transition-colors flex items-center justify-center gap-1.5"
+            className="w-full py-3.5 border border-dashed border-primary text-primary hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-xs font-bold rounded-2xl active-press transition-colors flex items-center justify-center gap-2"
           >
             {submittingException ? (
               <Loader2 className="h-4 w-4 animate-spin" />
