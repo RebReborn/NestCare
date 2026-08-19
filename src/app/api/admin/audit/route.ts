@@ -23,10 +23,20 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { action, entityType, entityId, details, metadata } = body;
+    const { action, entityType, entityId, details, reason, result, severity, requestId, sessionId, metadata } = body;
 
     if (!action || !details) {
       return NextResponse.json({ error: 'Missing action or details' }, { status: 400 });
+    }
+
+    // Require reason for critical financial changes
+    if (action === 'updated_financial_rules' && !reason?.trim()) {
+      return NextResponse.json({ error: 'A valid reason is required for financial rule changes.' }, { status: 400 });
+    }
+
+    // Require reason for inspecting chat transcripts
+    if (action === 'inspected_chat_transcript' && !reason?.trim()) {
+      return NextResponse.json({ error: 'A valid compliance reason is required to inspect private chat transcripts.' }, { status: 400 });
     }
 
     const clientIp = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'client_web';
@@ -34,10 +44,16 @@ export async function POST(req: NextRequest) {
 
     const success = await logAdminAction({
       adminId: user.id,
+      actorRole: profile?.role || 'admin',
       action,
       entityType: entityType || 'admin_action',
       entityId: entityId || null,
       details,
+      reason: reason || undefined,
+      result: result || 'success',
+      severity: severity || undefined,
+      requestId: requestId || req.headers.get('x-request-id') || undefined,
+      sessionId: sessionId || undefined,
       metadata: metadata || {},
       ipAddress: clientIp,
       userAgent,

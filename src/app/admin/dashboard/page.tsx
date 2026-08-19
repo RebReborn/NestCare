@@ -230,6 +230,13 @@ export default function AdminDashboardPage() {
       toast.error('No conversation ID found.');
       return;
     }
+
+    const reason = window.prompt('Privacy & Compliance Policy: Enter a valid reason for inspecting this private conversation transcript (e.g. Safety Report #R-1029):');
+    if (!reason || !reason.trim()) {
+      toast.error('Transcript inspection cancelled: A valid compliance reason is required to view private user messages.');
+      return;
+    }
+
     setInspectingConvId(convId);
     setLoadingInspectMessages(true);
     try {
@@ -241,6 +248,14 @@ export default function AdminDashboardPage() {
           entityType: 'conversation',
           entityId: convId,
           details: `Admin inspected chat conversation transcript (${convId})`,
+          reason,
+          severity: 'critical',
+          result: 'success',
+          metadata: {
+            conversation_id: convId,
+            scope: 'read_only_transcript_inspection',
+            access_timestamp: new Date().toISOString(),
+          },
         }),
       }).catch(e => console.warn('[Audit Log API]', e));
 
@@ -523,8 +538,25 @@ export default function AdminDashboardPage() {
 
   const handleUpdatePricing = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const reason = window.prompt('Administrative Security Policy: Enter a valid reason for updating financial rules & split-fee percentages:');
+    if (!reason || !reason.trim()) {
+      toast.error('Financial rule change cancelled: A valid reason is required for critical financial modifications.');
+      return;
+    }
+
     try {
       setUpdatingConfig(true);
+
+      const beforeState = pricingConfig ? {
+        parentFeePct: pricingConfig.parent_fee_percentage,
+        sitterCommPct: pricingConfig.sitter_commission_percentage,
+        minFee: pricingConfig.min_platform_fee_cents ? pricingConfig.min_platform_fee_cents / 100 : minFee,
+        maxFee: pricingConfig.max_platform_fee_cents ? pricingConfig.max_platform_fee_cents / 100 : maxFee,
+        taxPct: pricingConfig.tax_percentage,
+      } : { parentFeePct, sitterCommPct, minFee, maxFee, taxPct };
+
+      const afterState = { parentFeePct, sitterCommPct, minFee, maxFee, taxPct };
 
       const res = await fetch('/api/admin/pricing', {
         method: 'POST',
@@ -546,7 +578,25 @@ export default function AdminDashboardPage() {
         setPlatformPct(Number(resData.pricing.platform_percentage || (parentFeePct + sitterCommPct)));
       }
 
-      toast.success('Platform financial parameters updated & active!');
+      // Record critical audit log with immutable before/after state diff and reason
+      await fetch('/api/admin/audit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'updated_financial_rules',
+          entityType: 'pricing_config',
+          details: `Updated platform financial parameters (Parent Fee: ${parentFeePct}%, Sitter Comm: ${sitterCommPct}%, Tax: ${taxPct}%).`,
+          reason,
+          severity: 'critical',
+          result: 'success',
+          metadata: {
+            before: beforeState,
+            after: afterState,
+          },
+        }),
+      });
+
+      toast.success('Platform financial parameters updated & critical audit log recorded!');
       loadAdminData(true);
     } catch (err: any) {
       toast.error(err.message || 'Pricing update failed.');
@@ -2145,14 +2195,17 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
-      {/* AUDIT LOG JSON PAYLOAD INSPECTOR MODAL */}
+      {/* AUDIT LOG EXPANDED DETAILS & BEFORE/AFTER DIFF MODAL */}
       {inspectingAuditLog && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 max-w-2xl w-full shadow-2xl space-y-5 max-h-[85vh] flex flex-col justify-between">
+          <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 max-w-3xl w-full shadow-2xl space-y-5 max-h-[90vh] flex flex-col justify-between">
             <div className="flex items-center justify-between border-b border-stone-100 dark:border-slate-800 pb-3">
-              <h3 className="font-display text-base font-black text-heading dark:text-white flex items-center gap-2">
-                <FileText className="h-5 w-5 text-primary" /> Audit Payload Details ({inspectingAuditLog.action})
-              </h3>
+              <div>
+                <h3 className="font-display text-lg font-black text-heading dark:text-white flex items-center gap-2">
+                  <FileText className="h-5 w-5 text-primary" /> Audit Record Details ({inspectingAuditLog.action})
+                </h3>
+                <span className="text-[10px] text-stone-400 font-mono">ID: {inspectingAuditLog.id}</span>
+              </div>
               <button
                 onClick={() => setInspectingAuditLog(null)}
                 className="p-2 text-stone-400 hover:text-stone-700 dark:hover:text-white rounded-xl"
@@ -2162,37 +2215,97 @@ export default function AdminDashboardPage() {
             </div>
 
             <div className="space-y-4 overflow-y-auto pr-1 flex-1 text-xs">
-              <div className="grid grid-cols-2 gap-3 bg-stone-50 dark:bg-slate-800 p-4 rounded-2xl border border-stone-200 dark:border-slate-700">
+              {/* Header Badges & Core Attributes */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-stone-50 dark:bg-slate-800 p-4 rounded-2xl border border-stone-200/80 dark:border-slate-700">
                 <div>
-                  <span className="text-[10px] text-stone-400 dark:text-slate-400 uppercase font-bold block">Log ID</span>
-                  <span className="font-mono text-stone-800 dark:text-slate-200 font-bold">{inspectingAuditLog.id}</span>
+                  <span className="text-[10px] text-stone-400 dark:text-slate-400 uppercase font-bold block">ACTOR</span>
+                  <span className="font-bold text-heading dark:text-white block">{inspectingAuditLog.admin?.display_name || 'System Admin'}</span>
+                  <span className="text-[9px] text-stone-400 font-mono block">{inspectingAuditLog.actor_role || 'admin'}</span>
                 </div>
+
                 <div>
-                  <span className="text-[10px] text-stone-400 dark:text-slate-400 uppercase font-bold block">Timestamp</span>
-                  <span className="font-mono text-stone-800 dark:text-slate-200 font-bold">{new Date(inspectingAuditLog.created_at).toUTCString()}</span>
+                  <span className="text-[10px] text-stone-400 dark:text-slate-400 uppercase font-bold block">RESULT</span>
+                  <span className={`inline-block px-2.5 py-0.5 rounded-full font-black text-[9px] uppercase tracking-wider mt-1 ${
+                    inspectingAuditLog.result === 'failure' ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                  }`}>
+                    {inspectingAuditLog.result || 'success'}
+                  </span>
                 </div>
+
                 <div>
-                  <span className="text-[10px] text-stone-400 dark:text-slate-400 uppercase font-bold block">Actor ID</span>
-                  <span className="font-mono text-stone-800 dark:text-slate-200 font-bold">{inspectingAuditLog.actor_id || inspectingAuditLog.admin_id}</span>
+                  <span className="text-[10px] text-stone-400 dark:text-slate-400 uppercase font-bold block">SEVERITY</span>
+                  <span className={`inline-block px-2.5 py-0.5 rounded-full font-black text-[9px] uppercase tracking-wider mt-1 ${
+                    inspectingAuditLog.severity === 'critical' ? 'bg-rose-500 text-white font-extrabold animate-pulse' :
+                    inspectingAuditLog.severity === 'high' ? 'bg-amber-500 text-white font-bold' :
+                    'bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300'
+                  }`}>
+                    {inspectingAuditLog.severity || 'info'}
+                  </span>
                 </div>
+
                 <div>
-                  <span className="text-[10px] text-stone-400 dark:text-slate-400 uppercase font-bold block">IP Address</span>
-                  <span className="font-mono text-stone-800 dark:text-slate-200 font-bold">{inspectingAuditLog.ip_address || 'client_web'}</span>
+                  <span className="text-[10px] text-stone-400 dark:text-slate-400 uppercase font-bold block">TIMESTAMP (UTC)</span>
+                  <span className="font-mono text-stone-800 dark:text-slate-200 font-bold block mt-1">{new Date(inspectingAuditLog.created_at).toUTCString()}</span>
                 </div>
               </div>
 
-              <div>
-                <label className="block text-[10px] font-bold text-stone-400 dark:text-slate-400 uppercase tracking-wider mb-1">User Agent String</label>
-                <div className="p-3 bg-stone-50 dark:bg-slate-800 rounded-xl font-mono text-[11px] text-stone-700 dark:text-slate-300 break-all border border-stone-200 dark:border-slate-700">
-                  {inspectingAuditLog.user_agent || 'NestCare Admin Console'}
+              {/* Mandatory Reason (if specified) */}
+              {inspectingAuditLog.reason && (
+                <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-2xl space-y-1">
+                  <span className="text-[10px] font-black uppercase text-amber-600 dark:text-amber-400 tracking-wider block">Administrative Reason</span>
+                  <p className="text-xs font-bold text-heading dark:text-slate-100">{inspectingAuditLog.reason}</p>
+                </div>
+              )}
+
+              {/* Target Entity & Request Attributes */}
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div className="p-3.5 bg-stone-50 dark:bg-slate-800 rounded-2xl border border-stone-200/60 dark:border-slate-700">
+                  <span className="text-[10px] font-bold text-stone-400 dark:text-slate-400 uppercase block mb-1">Target Entity</span>
+                  <span className="font-bold text-heading dark:text-white block">Type: {inspectingAuditLog.entity_type || 'N/A'}</span>
+                  <span className="font-mono text-[10px] text-stone-500 dark:text-slate-400 block mt-0.5">ID: {inspectingAuditLog.entity_id || 'N/A'}</span>
+                </div>
+
+                <div className="p-3.5 bg-stone-50 dark:bg-slate-800 rounded-2xl border border-stone-200/60 dark:border-slate-700">
+                  <span className="text-[10px] font-bold text-stone-400 dark:text-slate-400 uppercase block mb-1">Request & IP Metadata</span>
+                  <span className="font-mono text-[10px] text-stone-700 dark:text-slate-300 block">Req ID: {inspectingAuditLog.request_id || 'req_system'}</span>
+                  <span className="font-mono text-[10px] text-stone-700 dark:text-slate-300 block mt-0.5">IP: {inspectingAuditLog.ip_address || 'client_web'}</span>
                 </div>
               </div>
 
+              {/* IMMUTABLE BEFORE / AFTER STATE DIFF */}
+              {(inspectingAuditLog.metadata?.before || inspectingAuditLog.metadata?.after) && (
+                <div className="space-y-2">
+                  <span className="text-[10px] font-black uppercase text-stone-500 dark:text-slate-400 tracking-wider block">Immutable Before / After State Diff</span>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="p-4 bg-rose-50/60 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 rounded-2xl space-y-2">
+                      <span className="text-[10px] font-bold uppercase text-rose-700 dark:text-rose-400 block">BEFORE STATE</span>
+                      <pre className="font-mono text-[11px] text-rose-950 dark:text-rose-200 overflow-x-auto">
+                        {JSON.stringify(inspectingAuditLog.metadata.before || {}, null, 2)}
+                      </pre>
+                    </div>
+
+                    <div className="p-4 bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50 rounded-2xl space-y-2">
+                      <span className="text-[10px] font-bold uppercase text-emerald-700 dark:text-emerald-400 block">AFTER STATE</span>
+                      <pre className="font-mono text-[11px] text-emerald-950 dark:text-emerald-200 overflow-x-auto">
+                        {JSON.stringify(inspectingAuditLog.metadata.after || {}, null, 2)}
+                      </pre>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Raw Sanitized Metadata Object */}
               <div>
-                <label className="block text-[10px] font-bold text-stone-400 dark:text-slate-400 uppercase tracking-wider mb-1">Raw JSON Metadata Object</label>
+                <label className="block text-[10px] font-bold text-stone-400 dark:text-slate-400 uppercase tracking-wider mb-1">Sanitized Metadata Payload (No Secrets/Passwords)</label>
                 <pre className="p-4 bg-slate-950 text-emerald-400 rounded-2xl font-mono text-xs overflow-x-auto border border-slate-800 shadow-inner">
                   {JSON.stringify(inspectingAuditLog.metadata || {}, null, 2)}
                 </pre>
+              </div>
+
+              {/* Cryptographic Tamper-Evident Hash Chain */}
+              <div className="p-3 bg-stone-100 dark:bg-slate-950 rounded-2xl border border-stone-200 dark:border-slate-800 font-mono text-[9px] text-stone-500 dark:text-slate-500 space-y-1">
+                <div><strong className="text-stone-700 dark:text-slate-300">LOG SHA-256 HASH:</strong> {inspectingAuditLog.log_hash || 'N/A'}</div>
+                <div><strong className="text-stone-700 dark:text-slate-300">PREV BLOCK HASH:</strong> {inspectingAuditLog.prev_hash || 'GENESIS_BLOCK_HASH_NESTCARE'}</div>
               </div>
             </div>
 
