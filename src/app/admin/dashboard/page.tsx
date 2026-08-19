@@ -66,21 +66,81 @@ export default function AdminDashboardPage() {
     setActiveTab(tabId);
   };
 
-  const handleUnlockProtectedAccess = (e: React.FormEvent) => {
+  // Audit Log Filters & Exporter State
+  const [auditSearchQuery, setAuditSearchQuery] = useState('');
+  const [auditActionFilter, setAuditActionFilter] = useState('all');
+  const [auditDateFilter, setAuditDateFilter] = useState('all');
+  const [inspectingAuditLog, setInspectingAuditLog] = useState<any | null>(null);
+
+  const handleUnlockProtectedAccess = async (e: React.FormEvent) => {
     e.preventDefault();
     if (passcodeInput.trim() === '2020') {
       setIsProtectedAccessUnlocked(true);
       setPasscodeModalOpen(false);
       setPasscodeError(false);
+
+      const unlockedTarget = targetProtectedTab === 'settings' ? 'Platform Settings & Maintenance' : 'Audit Logs';
+
       if (targetProtectedTab) {
         setActiveTab(targetProtectedTab);
         setTargetProtectedTab(null);
       }
       toast.success('Admin Security Clearance Granted (Passcode 2020 Verified)');
+
+      // Log security passcode unlock event to backend audit stream
+      try {
+        await fetch('/api/admin/audit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'unlocked_protected_settings',
+            entityType: 'platform_settings',
+            details: `Admin unlocked protected controls for ${unlockedTarget} using passcode 2020.`,
+            metadata: { target: unlockedTarget, code_used: '2020' },
+          }),
+        });
+      } catch (err) {
+        console.warn('Audit log write error:', err);
+      }
     } else {
       setPasscodeError(true);
       toast.error('Incorrect Security Passcode. Access Denied.');
     }
+  };
+
+  const handleExportAuditLogsCSV = () => {
+    if (auditLogs.length === 0) {
+      toast.error('No audit logs available to export.');
+      return;
+    }
+    const headers = ['Log ID', 'Timestamp (UTC)', 'Admin Name', 'Admin Email', 'Action', 'Entity Type', 'Entity ID', 'Details', 'IP Address', 'User Agent'];
+    const csvRows = [headers.join(',')];
+
+    auditLogs.forEach((log) => {
+      const row = [
+        `"${log.id}"`,
+        `"${new Date(log.created_at).toISOString()}"`,
+        `"${log.admin?.display_name || 'System Admin'}"`,
+        `"${log.admin?.email || ''}"`,
+        `"${log.action}"`,
+        `"${log.entity_type || ''}"`,
+        `"${log.entity_id || ''}"`,
+        `"${(log.details || '').replace(/"/g, '""')}"`,
+        `"${log.ip_address || ''}"`,
+        `"${(log.user_agent || '').replace(/"/g, '""')}"`,
+      ];
+      csvRows.push(row.join(','));
+    });
+
+    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `NestCare_Audit_Logs_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success('Audit logs exported successfully as CSV!');
   };
 
   const handleRelockProtectedAccess = () => {
@@ -1340,90 +1400,262 @@ export default function AdminDashboardPage() {
       </div>
     )}
 
-      {/* TAB 7: AUDIT LOGS */}
+      {/* TAB 7: MAXIMIZED ENTERPRISE AUDIT LOGS */}
       {activeTab === 'audit' && (
-        <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-6">
-          <div className="flex items-center justify-between border-b border-stone-100 dark:border-slate-800 pb-4">
-            <div>
-              <h3 className="font-display text-lg font-bold text-heading dark:text-white flex items-center gap-2">
-                <FileText className="h-5 w-5 text-primary" /> Administrative Audit Trail Stream ({auditLogs.length})
-              </h3>
-              <p className="text-xs text-stone-500 dark:text-slate-400">
-                Complete system log tracking all administrative account sign-ins, approvals, overrides, maintenance toggles, and chat inspections.
-              </p>
+        <div className="space-y-6">
+          {/* Top Analytics Summary Bar */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-stone-200 dark:border-slate-800 shadow-sm flex items-center justify-between">
+              <div>
+                <span className="text-[10px] text-stone-400 dark:text-slate-400 font-bold uppercase tracking-wider block">Total System Logs</span>
+                <span className="font-display text-2xl font-black text-heading dark:text-white mt-1 block">{auditLogs.length}</span>
+              </div>
+              <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 rounded-2xl text-primary">
+                <FileText className="h-6 w-6" />
+              </div>
             </div>
-            <span className="text-xs bg-stone-100 dark:bg-slate-800 text-stone-600 dark:text-slate-300 px-3.5 py-1.5 rounded-full font-bold">
-              Real-Time Security Logging
-            </span>
+
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-stone-200 dark:border-slate-800 shadow-sm flex items-center justify-between">
+              <div>
+                <span className="text-[10px] text-stone-400 dark:text-slate-400 font-bold uppercase tracking-wider block">Security & Passcode Events</span>
+                <span className="font-display text-2xl font-black text-amber-600 dark:text-amber-400 mt-1 block">
+                  {auditLogs.filter(l => l.action.includes('unlock') || l.action.includes('maintenance') || l.action.includes('login')).length}
+                </span>
+              </div>
+              <div className="p-3 bg-amber-50 dark:bg-amber-950/40 rounded-2xl text-amber-500">
+                <Lock className="h-6 w-6" />
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-stone-200 dark:border-slate-800 shadow-sm flex items-center justify-between">
+              <div>
+                <span className="text-[10px] text-stone-400 dark:text-slate-400 font-bold uppercase tracking-wider block">Moderation & Overrides</span>
+                <span className="font-display text-2xl font-black text-rose-600 dark:text-rose-400 mt-1 block">
+                  {auditLogs.filter(l => l.action.includes('suspend') || l.action.includes('reject') || l.action.includes('dispute')).length}
+                </span>
+              </div>
+              <div className="p-3 bg-rose-50 dark:bg-rose-950/40 rounded-2xl text-rose-500">
+                <ShieldAlert className="h-6 w-6" />
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-stone-200 dark:border-slate-800 shadow-sm flex items-center justify-between">
+              <div>
+                <span className="text-[10px] text-stone-400 dark:text-slate-400 font-bold uppercase tracking-wider block">Logged Admin Actors</span>
+                <span className="font-display text-2xl font-black text-heading dark:text-white mt-1 block">
+                  {new Set(auditLogs.map(l => l.admin_id || l.actor_id)).size}
+                </span>
+              </div>
+              <div className="p-3 bg-blue-50 dark:bg-blue-950/40 rounded-2xl text-blue-500">
+                <Users className="h-6 w-6" />
+              </div>
+            </div>
           </div>
 
-          {auditLogs.length === 0 ? (
-            <div className="bg-stone-50 dark:bg-slate-800/40 rounded-2xl p-8 text-center text-xs text-stone-400 font-medium italic border border-stone-200 dark:border-slate-800">
-              No administrative audit logs recorded yet.
+          {/* Main Audit Trail Container */}
+          <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6">
+            {/* Header & Controls */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-stone-100 dark:border-slate-800 pb-5">
+              <div>
+                <h3 className="font-display text-lg font-black text-heading dark:text-white flex items-center gap-2.5">
+                  <FileText className="h-5.5 w-5.5 text-primary" /> Comprehensive System Audit Stream
+                </h3>
+                <p className="text-xs text-stone-500 dark:text-slate-400 mt-1 font-medium">
+                  Real-time security log tracking all admin actions, passcode verifications, sitter approvals, user suspensions, booking overrides, pricing updates, and chat inspections.
+                </p>
+              </div>
+
+              <button
+                onClick={handleExportAuditLogsCSV}
+                className="px-4 py-2.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 text-primary dark:text-emerald-300 rounded-2xl text-xs font-bold active-press hover:bg-emerald-100 transition-colors flex items-center justify-center gap-2 shrink-0 shadow-2xs"
+              >
+                <ArrowUpRight className="h-4 w-4" /> Export CSV Log
+              </button>
             </div>
-          ) : (
-            <div className="space-y-3">
-              {auditLogs.map((log) => {
-                const adminName = log.admin?.display_name || 'System Admin';
-                const adminEmail = log.admin?.email || '';
-                const adminAvatar = log.admin?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100';
 
-                return (
-                  <div 
-                    key={log.id} 
-                    className="p-4 bg-stone-50 dark:bg-slate-800/70 rounded-2xl border border-stone-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-                  >
-                    <div className="flex items-center gap-3.5">
-                      <img
-                        src={adminAvatar}
-                        alt="Admin Avatar"
-                        className="w-9 h-9 rounded-xl object-cover border border-stone-200 dark:border-slate-700 shrink-0"
-                      />
-                      <div className="space-y-0.5 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-extrabold text-heading dark:text-white">
-                            {adminName}
-                          </span>
-                          {adminEmail && (
-                            <span className="text-[10px] text-stone-400 font-mono">
-                              ({adminEmail})
+            {/* Filter Bar */}
+            <div className="flex flex-col md:flex-row items-center gap-3">
+              <div className="relative flex-1 w-full">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-stone-400 dark:text-slate-500" />
+                <input
+                  type="text"
+                  placeholder="Search by action, admin name, email, IP, or details..."
+                  value={auditSearchQuery}
+                  onChange={(e) => setAuditSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 rounded-2xl border border-stone-200 dark:border-slate-700 outline-none text-xs bg-stone-50 dark:bg-slate-800 text-stone-900 dark:text-slate-100 font-medium focus:border-primary transition-colors"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 w-full md:w-auto">
+                <select
+                  value={auditActionFilter}
+                  onChange={(e) => setAuditActionFilter(e.target.value)}
+                  className="px-3 py-2.5 rounded-2xl border border-stone-200 dark:border-slate-700 text-xs bg-stone-50 dark:bg-slate-800 text-stone-800 dark:text-slate-200 font-bold outline-none"
+                >
+                  <option value="all" className="dark:bg-slate-900">All Action Categories</option>
+                  <option value="security" className="dark:bg-slate-900">🔒 Security & Passcodes</option>
+                  <option value="approvals" className="dark:bg-slate-900">✅ Sitter Approvals / Rejections</option>
+                  <option value="suspensions" className="dark:bg-slate-900">🚫 User Suspensions</option>
+                  <option value="financial" className="dark:bg-slate-900">💲 Financial Rules & Fees</option>
+                  <option value="moderation" className="dark:bg-slate-900">🚩 Moderation & Disputes</option>
+                </select>
+
+                <select
+                  value={auditDateFilter}
+                  onChange={(e) => setAuditDateFilter(e.target.value)}
+                  className="px-3 py-2.5 rounded-2xl border border-stone-200 dark:border-slate-700 text-xs bg-stone-50 dark:bg-slate-800 text-stone-800 dark:text-slate-200 font-bold outline-none"
+                >
+                  <option value="all" className="dark:bg-slate-900">All Time Ranges</option>
+                  <option value="today" className="dark:bg-slate-900">Today</option>
+                  <option value="7days" className="dark:bg-slate-900">Past 7 Days</option>
+                  <option value="30days" className="dark:bg-slate-900">Past 30 Days</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Audit Log Table List */}
+            {auditLogs.filter((log) => {
+              if (auditSearchQuery.trim()) {
+                const q = auditSearchQuery.toLowerCase().trim();
+                const adminName = (log.admin?.display_name || '').toLowerCase();
+                const adminEmail = (log.admin?.email || '').toLowerCase();
+                const details = (log.details || '').toLowerCase();
+                const action = (log.action || '').toLowerCase();
+                const ip = (log.ip_address || '').toLowerCase();
+                const entity = (log.entity_id || '').toLowerCase();
+                if (!adminName.includes(q) && !adminEmail.includes(q) && !details.includes(q) && !action.includes(q) && !ip.includes(q) && !entity.includes(q)) {
+                  return false;
+                }
+              }
+
+              if (auditActionFilter !== 'all') {
+                const act = log.action.toLowerCase();
+                if (auditActionFilter === 'security' && !act.includes('unlock') && !act.includes('maintenance') && !act.includes('login')) return false;
+                if (auditActionFilter === 'approvals' && !act.includes('approve') && !act.includes('reject')) return false;
+                if (auditActionFilter === 'suspensions' && !act.includes('suspend')) return false;
+                if (auditActionFilter === 'financial' && !act.includes('pricing') && !act.includes('financial') && !act.includes('fee')) return false;
+                if (auditActionFilter === 'moderation' && !act.includes('dispute') && !act.includes('report') && !act.includes('chat')) return false;
+              }
+
+              if (auditDateFilter !== 'all') {
+                const logDate = new Date(log.created_at).getTime();
+                const now = Date.now();
+                if (auditDateFilter === 'today' && now - logDate > 86400000) return false;
+                if (auditDateFilter === '7days' && now - logDate > 7 * 86400000) return false;
+                if (auditDateFilter === '30days' && now - logDate > 30 * 86400000) return false;
+              }
+
+              return true;
+            }).length === 0 ? (
+              <div className="bg-stone-50 dark:bg-slate-800/40 rounded-2xl p-10 text-center text-xs text-stone-400 font-medium italic border border-stone-200 dark:border-slate-800">
+                No audit logs match your search filters.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {auditLogs.filter((log) => {
+                  if (auditSearchQuery.trim()) {
+                    const q = auditSearchQuery.toLowerCase().trim();
+                    const adminName = (log.admin?.display_name || '').toLowerCase();
+                    const adminEmail = (log.admin?.email || '').toLowerCase();
+                    const details = (log.details || '').toLowerCase();
+                    const action = (log.action || '').toLowerCase();
+                    const ip = (log.ip_address || '').toLowerCase();
+                    const entity = (log.entity_id || '').toLowerCase();
+                    if (!adminName.includes(q) && !adminEmail.includes(q) && !details.includes(q) && !action.includes(q) && !ip.includes(q) && !entity.includes(q)) {
+                      return false;
+                    }
+                  }
+
+                  if (auditActionFilter !== 'all') {
+                    const act = log.action.toLowerCase();
+                    if (auditActionFilter === 'security' && !act.includes('unlock') && !act.includes('maintenance') && !act.includes('login')) return false;
+                    if (auditActionFilter === 'approvals' && !act.includes('approve') && !act.includes('reject')) return false;
+                    if (auditActionFilter === 'suspensions' && !act.includes('suspend')) return false;
+                    if (auditActionFilter === 'financial' && !act.includes('pricing') && !act.includes('financial') && !act.includes('fee')) return false;
+                    if (auditActionFilter === 'moderation' && !act.includes('dispute') && !act.includes('report') && !act.includes('chat')) return false;
+                  }
+
+                  if (auditDateFilter !== 'all') {
+                    const logDate = new Date(log.created_at).getTime();
+                    const now = Date.now();
+                    if (auditDateFilter === 'today' && now - logDate > 86400000) return false;
+                    if (auditDateFilter === '7days' && now - logDate > 7 * 86400000) return false;
+                    if (auditDateFilter === '30days' && now - logDate > 30 * 86400000) return false;
+                  }
+
+                  return true;
+                }).map((log) => {
+                  const adminName = log.admin?.display_name || 'System Admin';
+                  const adminEmail = log.admin?.email || '';
+                  const adminAvatar = log.admin?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100';
+
+                  const isSecurity = log.action.includes('unlock') || log.action.includes('maintenance') || log.action.includes('login');
+                  const isWarning = log.action.includes('suspend') || log.action.includes('reject') || log.action.includes('dispute');
+                  const isSuccess = log.action.includes('approve') || log.action.includes('activate') || log.action.includes('pricing');
+
+                  return (
+                    <div 
+                      key={log.id} 
+                      className="p-4 sm:p-5 bg-stone-50 dark:bg-slate-800/70 rounded-2xl border border-stone-200/80 dark:border-slate-700/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs transition-all hover:border-primary/40"
+                    >
+                      <div className="flex items-start sm:items-center gap-3.5">
+                        <img
+                          src={adminAvatar}
+                          alt="Admin Avatar"
+                          className="w-10 h-10 rounded-xl object-cover border border-stone-200 dark:border-slate-700 shrink-0 mt-0.5 sm:mt-0"
+                        />
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-black text-heading dark:text-white text-xs sm:text-sm">
+                              {adminName}
                             </span>
-                          )}
-                          <span className={`text-[9px] px-2.5 py-0.5 rounded-full font-black uppercase tracking-wider ${
-                            log.action.includes('maintenance') ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300' :
-                            log.action.includes('approve') || log.action.includes('activate') ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300' :
-                            log.action.includes('suspend') || log.action.includes('reject') ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300' :
-                            'bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300'
-                          }`}>
-                            {log.action.replace(/_/g, ' ')}
-                          </span>
-                        </div>
+                            {adminEmail && (
+                              <span className="text-[10px] text-stone-400 dark:text-slate-400 font-mono">
+                                ({adminEmail})
+                              </span>
+                            )}
+                            <span className={`text-[9px] px-2.5 py-0.5 rounded-full font-black uppercase tracking-wider ${
+                              isSecurity ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300' :
+                              isWarning ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300' :
+                              isSuccess ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300' :
+                              'bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300'
+                            }`}>
+                              {log.action.replace(/_/g, ' ')}
+                            </span>
+                          </div>
 
-                        <p className="text-xs text-stone-700 dark:text-slate-200 font-medium">
-                          {log.details || log.action}
-                        </p>
+                          <p className="text-xs text-stone-700 dark:text-slate-200 font-medium leading-relaxed">
+                            {log.details || log.action}
+                          </p>
 
-                        <div className="flex items-center gap-3 text-[10px] text-stone-400 font-mono pt-0.5">
-                          {log.entity_type && (
-                            <span>Entity: <strong className="text-stone-600 dark:text-slate-300">{log.entity_type}</strong> {log.entity_id ? `(${log.entity_id.slice(0, 8)})` : ''}</span>
-                          )}
-                          {log.ip_address && (
-                            <span>IP: {log.ip_address}</span>
-                          )}
+                          <div className="flex flex-wrap items-center gap-3 text-[10px] text-stone-400 dark:text-slate-400 font-mono pt-0.5">
+                            {log.entity_type && (
+                              <span>Entity: <strong className="text-stone-600 dark:text-slate-300">{log.entity_type}</strong> {log.entity_id ? `(${log.entity_id.slice(0, 8)})` : ''}</span>
+                            )}
+                            {log.ip_address && (
+                              <span>IP: <strong className="text-stone-600 dark:text-slate-300">{log.ip_address}</strong></span>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="shrink-0 text-right">
-                      <span className="text-[10px] font-bold text-stone-500 dark:text-slate-400 bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 px-3 py-1 rounded-xl block font-mono">
-                        {new Date(log.created_at).toLocaleString()}
-                      </span>
+                      <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-2 shrink-0 border-t sm:border-t-0 border-stone-200/60 dark:border-slate-700/60 pt-2 sm:pt-0">
+                        <span className="text-[10px] font-bold text-stone-500 dark:text-slate-400 bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 px-3 py-1 rounded-xl block font-mono">
+                          {new Date(log.created_at).toLocaleString()}
+                        </span>
+                        <button
+                          onClick={() => setInspectingAuditLog(log)}
+                          className="px-3 py-1 bg-stone-100 dark:bg-slate-800 hover:bg-stone-200 dark:hover:bg-slate-700 text-stone-700 dark:text-slate-200 rounded-xl text-[10px] font-bold transition-colors active-press flex items-center gap-1"
+                        >
+                          <Eye className="h-3 w-3 text-primary" /> View Payload
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -1909,6 +2141,67 @@ export default function AdminDashboardPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      {/* AUDIT LOG JSON PAYLOAD INSPECTOR MODAL */}
+      {inspectingAuditLog && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 max-w-2xl w-full shadow-2xl space-y-5 max-h-[85vh] flex flex-col justify-between">
+            <div className="flex items-center justify-between border-b border-stone-100 dark:border-slate-800 pb-3">
+              <h3 className="font-display text-base font-black text-heading dark:text-white flex items-center gap-2">
+                <FileText className="h-5 w-5 text-primary" /> Audit Payload Details ({inspectingAuditLog.action})
+              </h3>
+              <button
+                onClick={() => setInspectingAuditLog(null)}
+                className="p-2 text-stone-400 hover:text-stone-700 dark:hover:text-white rounded-xl"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 overflow-y-auto pr-1 flex-1 text-xs">
+              <div className="grid grid-cols-2 gap-3 bg-stone-50 dark:bg-slate-800 p-4 rounded-2xl border border-stone-200 dark:border-slate-700">
+                <div>
+                  <span className="text-[10px] text-stone-400 dark:text-slate-400 uppercase font-bold block">Log ID</span>
+                  <span className="font-mono text-stone-800 dark:text-slate-200 font-bold">{inspectingAuditLog.id}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-stone-400 dark:text-slate-400 uppercase font-bold block">Timestamp</span>
+                  <span className="font-mono text-stone-800 dark:text-slate-200 font-bold">{new Date(inspectingAuditLog.created_at).toUTCString()}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-stone-400 dark:text-slate-400 uppercase font-bold block">Actor ID</span>
+                  <span className="font-mono text-stone-800 dark:text-slate-200 font-bold">{inspectingAuditLog.actor_id || inspectingAuditLog.admin_id}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-stone-400 dark:text-slate-400 uppercase font-bold block">IP Address</span>
+                  <span className="font-mono text-stone-800 dark:text-slate-200 font-bold">{inspectingAuditLog.ip_address || 'client_web'}</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-stone-400 dark:text-slate-400 uppercase tracking-wider mb-1">User Agent String</label>
+                <div className="p-3 bg-stone-50 dark:bg-slate-800 rounded-xl font-mono text-[11px] text-stone-700 dark:text-slate-300 break-all border border-stone-200 dark:border-slate-700">
+                  {inspectingAuditLog.user_agent || 'NestCare Admin Console'}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-stone-400 dark:text-slate-400 uppercase tracking-wider mb-1">Raw JSON Metadata Object</label>
+                <pre className="p-4 bg-slate-950 text-emerald-400 rounded-2xl font-mono text-xs overflow-x-auto border border-slate-800 shadow-inner">
+                  {JSON.stringify(inspectingAuditLog.metadata || {}, null, 2)}
+                </pre>
+              </div>
+            </div>
+
+            <div className="pt-2 flex justify-end shrink-0 border-t border-stone-100 dark:border-slate-800">
+              <button
+                onClick={() => setInspectingAuditLog(null)}
+                className="px-5 py-2.5 bg-primary text-white rounded-xl text-xs font-bold active-press shadow-md"
+              >
+                Close Details
+              </button>
+            </div>
           </div>
         </div>
       )}
