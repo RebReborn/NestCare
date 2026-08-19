@@ -411,14 +411,28 @@ export default function AdminDashboardPage() {
         setPlatformSettings(pSettings);
       }
 
-      // Fetch audit logs
+      // Fetch audit logs (up to 500 logs with enriched actor profiles)
       const { data: logsData } = await supabase
         .from('audit_logs')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(20);
+        .limit(500);
 
-      setAuditLogs(logsData || []);
+      const enrichedLogs = (logsData || []).map((log) => {
+        const actor = usersList.find((u) => u.id === (log.actor_id || log.admin_id));
+        return {
+          ...log,
+          admin: actor
+            ? {
+                display_name: actor.display_name,
+                email: actor.email,
+                avatar_url: actor.avatar_url,
+              }
+            : log.admin,
+        };
+      });
+
+      setAuditLogs(enrichedLogs);
 
       // Fetch user reports
       const { data: reportsData } = await supabase
@@ -463,6 +477,26 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     loadAdminData();
+
+    // Real-Time Audit Stream Channel
+    const channel = supabase
+      .channel('realtime_audit_stream')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'audit_logs' },
+        (payload) => {
+          const newLog = payload.new as any;
+          setAuditLogs((prev) => {
+            if (prev.some((l) => l.id === newLog.id)) return prev;
+            return [newLog, ...prev];
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const handleApproveSitter = async (sitterId: string) => {
