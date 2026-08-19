@@ -460,6 +460,56 @@ export default function VideoCallModal({
     }
   };
 
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  const [isFlippingCamera, setIsFlippingCamera] = useState(false);
+
+  const handleFlipCamera = async () => {
+    if (!localStreamRef.current || !pcRef.current || callMode !== 'video' || isVideoOff) return;
+    try {
+      setIsFlippingCamera(true);
+      const nextFacingMode = facingMode === 'user' ? 'environment' : 'user';
+
+      const oldTrack = localStreamRef.current.getVideoTracks()[0];
+      if (oldTrack) {
+        oldTrack.stop();
+        localStreamRef.current.removeTrack(oldTrack);
+      }
+
+      let newStream: MediaStream;
+      try {
+        newStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { exact: nextFacingMode } },
+        });
+      } catch (e) {
+        newStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: nextFacingMode },
+        });
+      }
+
+      const newTrack = newStream.getVideoTracks()[0];
+      if (newTrack) {
+        localStreamRef.current.addTrack(newTrack);
+
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = localStreamRef.current;
+        }
+
+        const sender = pcRef.current.getSenders().find((s) => s.track?.kind === 'video');
+        if (sender) {
+          await sender.replaceTrack(newTrack);
+        }
+
+        setFacingMode(nextFacingMode);
+        toast.info(`Switched to ${nextFacingMode === 'user' ? 'front' : 'back'} camera`);
+      }
+    } catch (err: any) {
+      console.error('[WebRTC] Camera flip error:', err);
+      toast.error('Could not switch camera.');
+    } finally {
+      setIsFlippingCamera(false);
+    }
+  };
+
   const formatDuration = (secs: number) => {
     const mins = Math.floor(secs / 60);
     const s = secs % 60;
@@ -605,6 +655,22 @@ export default function VideoCallModal({
           >
             {isVideoOff ? <VideoOff className="h-5 w-5" /> : <Video className="h-5 w-5" />}
           </button>
+
+          {/* Flip Camera (Front/Back) */}
+          {callMode === 'video' && !isVideoOff && (
+            <button
+              onClick={handleFlipCamera}
+              disabled={isFlippingCamera}
+              className={`p-3.5 rounded-2xl border transition-all active-press ${
+                facingMode === 'environment'
+                  ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400'
+                  : 'bg-slate-800 border-slate-700 text-white hover:bg-slate-700'
+              }`}
+              title={`Switch Camera (Currently: ${facingMode === 'user' ? 'Front' : 'Back'})`}
+            >
+              <RefreshCw className={`h-5 w-5 ${isFlippingCamera ? 'animate-spin' : ''}`} />
+            </button>
+          )}
 
           {/* Screen Share */}
           <button
