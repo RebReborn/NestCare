@@ -20,16 +20,18 @@ export function GlobalCallListener() {
   useEffect(() => {
     let broadcastChannel: any = null;
     let dbChannel: any = null;
+    let isSubscribed = true;
 
     async function initUserCallListener() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user || !isSubscribed) return;
       setCurrentUser(user);
 
       const broadcastTopic = `call_broadcast_${user.id}`;
       const dbTopic = `call_db_${user.id}`;
 
-      // Safely remove any pre-existing channel instances to prevent React StrictMode re-subscription errors
+      // Clean up previous channel references if registered to avoid duplicate listeners
       try {
         const existingChannels = supabase.getChannels();
         existingChannels.forEach((ch: any) => {
@@ -43,7 +45,7 @@ export function GlobalCallListener() {
 
       // 1. Dedicated WebSocket Broadcast Channel
       broadcastChannel = supabase
-        .channel(broadcastTopic)
+        .channel(broadcastTopic, { config: { broadcast: { self: false } } })
         .on('broadcast', { event: 'call_invite' }, ({ payload }) => {
           console.log('[Global Call Listener] Incoming broadcast signal received:', payload);
           if (payload?.callerId && payload.callerId !== user.id) {
@@ -61,7 +63,9 @@ export function GlobalCallListener() {
           console.log('[Global Call Listener] Call cancelled by caller');
           setIncomingCall(null);
         })
-        .subscribe();
+        .subscribe((status) => {
+          console.log(`[Global Call Listener] Broadcast channel status for ${user.id}:`, status);
+        });
 
       // 2. Dedicated PostgreSQL DB Notification Changes Channel
       dbChannel = supabase
@@ -96,12 +100,23 @@ export function GlobalCallListener() {
             }
           }
         )
-        .subscribe();
+        .subscribe((status) => {
+          console.log(`[Global Call Listener] DB channel status for ${user.id}:`, status);
+        });
     }
 
     initUserCallListener();
 
+    // Listen to Auth State Changes so channels re-initialize instantly when logged in
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.user && (!currentUser || currentUser.id !== session.user.id)) {
+        initUserCallListener();
+      }
+    });
+
     return () => {
+      isSubscribed = false;
+      subscription?.unsubscribe();
       if (broadcastChannel) supabase.removeChannel(broadcastChannel);
       if (dbChannel) supabase.removeChannel(dbChannel);
     };
