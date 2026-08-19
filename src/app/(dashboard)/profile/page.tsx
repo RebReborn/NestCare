@@ -6,13 +6,17 @@ import { toast } from 'sonner';
 import { 
   User, Loader2, Save, ExternalLink, ShieldCheck, DollarSign, Baby, Heart, 
   Pencil, X, Check, Camera, Mail, Calendar, CreditCard, Image as ImageIcon,
-  Plus, Trash2, Clock, Sparkles
+  Plus, Trash2, Clock, Sparkles, MapPin, Navigation, Info, Phone, AlertTriangle,
+  FileText, MessageCircle, Home, HeartHandshake, Stethoscope, ChevronRight
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { PaymentMethodsModal } from '@/components/payments/payment-methods-modal';
+import LocationAutocompleteInput from '@/components/location/location-autocomplete-input';
+import { geocodeLocation } from '@/lib/location/geocoder';
 
 const SERVICES = ['In-home Babysitting', 'Overnight Care', 'After-school Pickup', 'Daycare Pickup', 'Weekend Care', 'Emergency Care'];
 const LANGUAGES = ['English', 'Spanish', 'French', 'German', 'Mandarin', 'American Sign Language'];
+const AGE_GROUPS = ['Infant (0-1 yrs)', 'Toddler (1-3 yrs)', 'Preschool (3-5 yrs)', 'School-Age (5-12 yrs)', 'Teen (13+ yrs)'];
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -28,19 +32,31 @@ export default function ProfilePage() {
   const [isEditingBasic, setIsEditingBasic] = useState(false);
   const [isEditingPro, setIsEditingPro] = useState(false);
   const [isEditingGallery, setIsEditingGallery] = useState(false);
+  const [isEditingLocation, setIsEditingLocation] = useState(false);
+  const [isEditingEmergency, setIsEditingEmergency] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
 
-  // Profile fields (shared)
+  // Shared Profile fields
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [bio, setBio] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
 
-  // Temp draft states for Basic Info edit mode
+  // Draft states for Basic Info
   const [draftFirstName, setDraftFirstName] = useState('');
   const [draftLastName, setDraftLastName] = useState('');
   const [draftBio, setDraftBio] = useState('');
   const [draftAvatarUrl, setDraftAvatarUrl] = useState('');
+
+  // Location fields
+  const [serviceArea, setServiceArea] = useState('');
+  const [city, setCity] = useState('');
+  const [province, setProvince] = useState('');
+  const [serviceLatitude, setServiceLatitude] = useState<number | null>(null);
+  const [serviceLongitude, setServiceLongitude] = useState<number | null>(null);
+  const [serviceRadiusKm, setServiceRadiusKm] = useState(15);
+  const [travelToParent, setTravelToParent] = useState(true);
+  const [acceptDropoff, setAcceptDropoff] = useState(false);
 
   // Sitter-specific profile fields
   const [headline, setHeadline] = useState('');
@@ -49,22 +65,41 @@ export default function ProfilePage() {
   const [maxChildren, setMaxChildren] = useState(3);
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [selectedLanguages, setSelectedLanguages] = useState<string[]>([]);
-
-  // Sitter Gallery fields
   const [galleryUrls, setGalleryUrls] = useState<string[]>(['']);
   const [additionalChildRate, setAdditionalChildRate] = useState(5);
   const [pricingModel, setPricingModel] = useState<'flat' | 'additional_child' | 'per_child'>('flat');
   const [coverUrl, setCoverUrl] = useState('');
   const [minimumNoticeHours, setMinimumNoticeHours] = useState(0);
-
-  // Sitter availability summary
   const [availRules, setAvailRules] = useState<any[]>([]);
   const [stripeConnected, setStripeConnected] = useState(false);
   const [stripeAccountId, setStripeAccountId] = useState('');
 
   // Parent Specific fields
+  const [emergencyContactName, setEmergencyContactName] = useState('');
+  const [emergencyContactPhone, setEmergencyContactPhone] = useState('');
+  const [houseRules, setHouseRules] = useState('');
+  const [petsInfo, setPetsInfo] = useState('');
   const [savedSitters, setSavedSitters] = useState<any[]>([]);
   const [children, setChildren] = useState<any[]>([]);
+
+  // Parent Home Location fields
+  const [parentHomeArea, setParentHomeArea] = useState('');
+  const [parentCity, setParentCity] = useState('');
+  const [parentProvince, setParentProvince] = useState('');
+  const [parentLat, setParentLat] = useState<number | null>(null);
+  const [parentLng, setParentLng] = useState<number | null>(null);
+  const [isEditingParentLocation, setIsEditingParentLocation] = useState(false);
+
+  // Child modal state
+  const [showChildModal, setShowChildModal] = useState(false);
+  const [editingChildId, setEditingChildId] = useState<string | null>(null);
+  const [childFirstName, setChildFirstName] = useState('');
+  const [childDob, setChildDob] = useState('');
+  const [childAgeGroup, setChildAgeGroup] = useState('Toddler (1-3 yrs)');
+  const [childAllergies, setChildAllergies] = useState('');
+  const [childMedications, setChildMedications] = useState('');
+  const [childInstructions, setChildInstructions] = useState('');
+  const [savingChild, setSavingChild] = useState(false);
 
   useEffect(() => {
     async function loadProfile() {
@@ -97,6 +132,11 @@ export default function ProfilePage() {
           setDraftBio(prof.bio || '');
           setDraftAvatarUrl(prof.avatar_url || '');
 
+          setEmergencyContactName(prof.emergency_contact_name || '');
+          setEmergencyContactPhone(prof.emergency_contact_phone || '');
+          setHouseRules(prof.house_rules || '');
+          setPetsInfo(prof.pets_info || '');
+
           if (prof.role === 'sitter') {
             const { data: sitterDetails } = await supabase
               .from('sitter_profiles')
@@ -110,6 +150,14 @@ export default function ProfilePage() {
                 minimum_notice_hours,
                 gallery_urls,
                 cover_url,
+                city,
+                province,
+                service_area,
+                service_latitude,
+                service_longitude,
+                service_radius_km,
+                travel_to_parent,
+                accept_dropoff,
                 sitter_services(service_type),
                 sitter_languages(language)
               `)
@@ -125,6 +173,15 @@ export default function ProfilePage() {
               setMaxChildren(sitterDetails.max_children || 3);
               setMinimumNoticeHours(sitterDetails.minimum_notice_hours || 0);
               
+              setCity(sitterDetails.city || 'Vancouver');
+              setProvince(sitterDetails.province || 'BC');
+              setServiceArea(sitterDetails.service_area || sitterDetails.city || '');
+              setServiceLatitude(sitterDetails.service_latitude || prof.location_lat || null);
+              setServiceLongitude(sitterDetails.service_longitude || prof.location_lng || null);
+              setServiceRadiusKm(sitterDetails.service_radius_km || 15);
+              setTravelToParent(sitterDetails.travel_to_parent ?? true);
+              setAcceptDropoff(sitterDetails.accept_dropoff ?? false);
+
               const sList = (sitterDetails as any).sitter_services?.map((s: any) => s.service_type) || [];
               const lList = (sitterDetails as any).sitter_languages?.map((l: any) => l.language) || [];
               setSelectedServices(sList);
@@ -155,20 +212,40 @@ export default function ProfilePage() {
             }
 
           } else if (prof.role === 'parent') {
+            // Load parent home location from profiles
+            setParentLat(prof.location_lat || null);
+            setParentLng(prof.location_lng || null);
+            // Try to reverse-geocode stored coordinates into a human-readable address
+            if (prof.location_lat && prof.location_lng) {
+              import('@/lib/location/geocoder').then(({ reverseGeocodeLocation }) => {
+                reverseGeocodeLocation(prof.location_lat, prof.location_lng).then((r) => {
+                  if (r) {
+                    setParentHomeArea(r.displayName || r.city || '');
+                    setParentCity(r.city || '');
+                    setParentProvince(r.province || '');
+                  }
+                });
+              });
+            }
+
+            // Fetch children
             const { data: kids } = await supabase
               .from('children')
               .select('*')
-              .eq('parent_id', user.id);
+              .eq('parent_id', user.id)
+              .order('created_at', { ascending: true });
             setChildren(kids || []);
 
+            // Fetch favorite sitters
             const { data: favs } = await supabase
               .from('favorites')
               .select(`
                 sitter_id,
                 sitter:sitter_profiles(
                   id,
-                  hourly_rate,
+                  base_hourly_rate_cents,
                   years_experience,
+                  city,
                   profile:profiles(
                     display_name,
                     avatar_url
@@ -180,11 +257,12 @@ export default function ProfilePage() {
             const mappedFavs = (favs || []).map((f: any) => {
               const s = f.sitter;
               return {
-                id: s.id,
-                name: s.profile?.display_name || 'Caregiver',
-                avatar_url: s.profile?.avatar_url || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100',
-                hourly_rate: s.hourly_rate,
-                years_experience: s.years_experience,
+                id: s?.id || f.sitter_id,
+                name: s?.profile?.display_name || 'Caregiver',
+                avatar_url: s?.profile?.avatar_url || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100',
+                hourly_rate: s?.base_hourly_rate_cents ? Math.round(Number(s.base_hourly_rate_cents) / 100) : 22,
+                years_experience: s?.years_experience || 2,
+                city: s?.city || 'Vancouver',
               };
             });
             setSavedSitters(mappedFavs);
@@ -198,18 +276,6 @@ export default function ProfilePage() {
     }
     loadProfile();
   }, []);
-
-  const handleServiceChange = (service: string) => {
-    setSelectedServices(prev => 
-      prev.includes(service) ? prev.filter(s => s !== service) : [...prev, service]
-    );
-  };
-
-  const handleLanguageChange = (lang: string) => {
-    setSelectedLanguages(prev => 
-      prev.includes(lang) ? prev.filter(l => l !== lang) : [...prev, lang]
-    );
-  };
 
   const handleSaveBasicInfo = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -247,50 +313,195 @@ export default function ProfilePage() {
     }
   };
 
-  const handleSaveProDetails = async (e: React.FormEvent) => {
+  const handleSaveEmergencyContact = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userId || role !== 'sitter') return;
+    if (!userId) return;
 
     try {
       setSaving(true);
-      const finalUrls = galleryUrls.map(url => url.trim()).filter(Boolean);
-
-      const { error: sitterErr } = await supabase
-        .from('sitter_profiles')
+      const { error: err } = await supabase
+        .from('profiles')
         .update({
-          headline,
-          base_hourly_rate_cents: hourlyRate * 100,
-          additional_child_rate_cents: (additionalChildRate || 0) * 100,
-          pricing_model: pricingModel,
-          years_experience: yearsExperience,
-          max_children: maxChildren,
-          minimum_notice_hours: minimumNoticeHours,
-          gallery_urls: finalUrls,
-          cover_url: coverUrl.trim() || 'https://images.unsplash.com/photo-1516627145497-ae6968895b74?w=800',
+          emergency_contact_name: emergencyContactName,
+          emergency_contact_phone: emergencyContactPhone,
+          house_rules: houseRules,
+          pets_info: petsInfo,
         })
         .eq('id', userId);
 
-      if (sitterErr) throw sitterErr;
-
-      await supabase.from('sitter_services').delete().eq('sitter_id', userId);
-      if (selectedServices.length > 0) {
-        const sInsert = selectedServices.map(s => ({ sitter_id: userId, service_type: s }));
-        const { error: sErr } = await supabase.from('sitter_services').insert(sInsert);
-        if (sErr) throw sErr;
-      }
-
-      await supabase.from('sitter_languages').delete().eq('sitter_id', userId);
-      if (selectedLanguages.length > 0) {
-        const lInsert = selectedLanguages.map(l => ({ sitter_id: userId, language: l }));
-        const { error: lErr } = await supabase.from('sitter_languages').insert(lInsert);
-        if (lErr) throw lErr;
-      }
-
-      setIsEditingPro(false);
-      setIsEditingGallery(false);
-      toast.success('Professional details saved successfully!');
+      if (err) throw err;
+      setIsEditingEmergency(false);
+      toast.success('Emergency contact & house details updated successfully!');
     } catch (err: any) {
-      toast.error(err.message || 'Failed to update professional details.');
+      toast.error(err.message || 'Failed to update emergency details.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveParentLocation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userId) return;
+
+    try {
+      setSaving(true);
+
+      const updatePayload: any = {};
+      if (parentLat && parentLng) {
+        updatePayload.location_lat = parentLat;
+        updatePayload.location_lng = parentLng;
+      }
+
+      const { error: err } = await supabase
+        .from('profiles')
+        .update(updatePayload)
+        .eq('id', userId);
+
+      if (err) throw err;
+      setIsEditingParentLocation(false);
+      toast.success('Home location saved! Your searches will now be centred around your neighbourhood.');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save home location.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openAddChildModal = () => {
+    setEditingChildId(null);
+    setChildFirstName('');
+    setChildDob('');
+    setChildAgeGroup('Toddler (1-3 yrs)');
+    setChildAllergies('');
+    setChildMedications('');
+    setChildInstructions('');
+    setShowChildModal(true);
+  };
+
+  const openEditChildModal = (child: any) => {
+    setEditingChildId(child.id);
+    setChildFirstName(child.first_name || '');
+    setChildDob(child.date_of_birth || '');
+    setChildAgeGroup(child.age_group || 'Toddler (1-3 yrs)');
+    setChildAllergies(child.allergies || '');
+    setChildMedications(child.medications || '');
+    setChildInstructions(child.special_instructions || '');
+    setShowChildModal(true);
+  };
+
+  const handleSaveChild = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userId || !childFirstName.trim()) return;
+
+    try {
+      setSavingChild(true);
+      const payload: any = {
+        parent_id: userId,
+        first_name: childFirstName.trim(),
+        date_of_birth: childDob || null,
+        age_group: childAgeGroup,
+        allergies: childAllergies.trim() || null,
+        medications: childMedications.trim() || null,
+        special_instructions: childInstructions.trim() || null,
+      };
+
+      if (editingChildId) {
+        const { error: err } = await supabase
+          .from('children')
+          .update(payload)
+          .eq('id', editingChildId);
+
+        if (err) throw err;
+        setChildren(prev => prev.map(c => c.id === editingChildId ? { ...c, ...payload } : c));
+        toast.success(`${childFirstName}'s details updated successfully!`);
+      } else {
+        const { data: newChild, error: err } = await supabase
+          .from('children')
+          .insert(payload)
+          .select()
+          .single();
+
+        if (err) throw err;
+        setChildren(prev => [...prev, newChild]);
+        toast.success(`Added ${childFirstName} to family profile!`);
+      }
+
+      setShowChildModal(false);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save child details.');
+    } finally {
+      setSavingChild(false);
+    }
+  };
+
+  const handleDeleteChild = async (childId: string, name: string) => {
+    if (!confirm(`Are you sure you want to remove ${name} from your profile?`)) return;
+    try {
+      const { error: err } = await supabase.from('children').delete().eq('id', childId);
+      if (err) throw err;
+      setChildren(prev => prev.filter(c => c.id !== childId));
+      toast.success(`Removed ${name} from family profile.`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to remove child.');
+    }
+  };
+
+  const handleRemoveFavorite = async (sitterId: string, name: string) => {
+    try {
+      const { error: err } = await supabase
+        .from('favorites')
+        .delete()
+        .eq('parent_id', userId)
+        .eq('sitter_id', sitterId);
+
+      if (err) throw err;
+      setSavedSitters(prev => prev.filter(s => s.id !== sitterId));
+      toast.success(`Removed ${name} from your saved sitters.`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to remove saved sitter.');
+    }
+  };
+
+  const handleSaveLocation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userId) return;
+
+    try {
+      setSaving(true);
+      const parts = (serviceArea || '').split(',').map((s) => s.trim());
+      const cityVal = city || parts[0] || serviceArea || 'Vancouver';
+      const provVal = province || parts[1] || 'BC';
+
+      const updateObj: any = {
+        city: cityVal,
+        province: provVal,
+        service_radius_km: serviceRadiusKm,
+        travel_to_parent: travelToParent,
+        accept_dropoff: acceptDropoff,
+      };
+
+      if (serviceLatitude && serviceLongitude) {
+        updateObj.service_latitude = serviceLatitude;
+        updateObj.service_longitude = serviceLongitude;
+
+        await supabase.from('profiles').update({
+          location_lat: serviceLatitude,
+          location_lng: serviceLongitude,
+        }).eq('id', userId);
+      }
+
+      if (role === 'sitter') {
+        const { error: err } = await supabase
+          .from('sitter_profiles')
+          .update(updateObj)
+          .eq('id', userId);
+        if (err) throw err;
+      }
+
+      setIsEditingLocation(false);
+      toast.success('Household location updated successfully!');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update location.');
     } finally {
       setSaving(false);
     }
@@ -307,14 +518,32 @@ export default function ProfilePage() {
   const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
   return (
-    <div className="space-y-6 max-w-2xl mx-auto pb-12">
+    <div className="space-y-6 max-w-3xl mx-auto pb-16">
       {/* Top Bar Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-stone-200 dark:border-slate-800 shadow-sm">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-stone-200 dark:border-slate-800 shadow-xs">
         <div>
-          <h1 className="font-display text-2xl font-black text-heading dark:text-white">Profile Overview</h1>
-          <p className="text-xs text-stone-400 mt-1">Manage your public information and account details.</p>
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-primary/10 rounded-full text-[11px] font-bold text-primary mb-1">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            {role === 'parent' ? 'Verified NestCare Family' : 'NestCare Professional Sitter'}
+          </div>
+          <h1 className="font-display text-2xl font-black text-heading dark:text-white">
+            {role === 'parent' ? 'Family Account & Care Profile' : 'Profile Overview'}
+          </h1>
+          <p className="text-xs text-stone-400">
+            {role === 'parent' 
+              ? 'Manage children details, emergency contacts, saved caregivers, and house rules.' 
+              : 'Manage your public information and account details.'}
+          </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          {role === 'parent' && (
+            <button
+              onClick={openAddChildModal}
+              className="px-4 py-2.5 bg-primary text-white rounded-2xl active-press hover:bg-emerald-800 flex items-center gap-1.5 text-xs font-bold transition-all shadow-xs"
+            >
+              <Plus className="h-4 w-4" /> Add Child
+            </button>
+          )}
           {role === 'sitter' && (
             <button
               onClick={() => router.push(`/sitter/${userId}`)}
@@ -324,21 +553,25 @@ export default function ProfilePage() {
             </button>
           )}
           <button
-            onClick={() => router.push('/settings')}
+            onClick={() => {
+              toast.success('Profile changes saved!');
+              router.push('/dashboard');
+            }}
             className="px-4 py-2.5 bg-stone-100 dark:bg-slate-800 text-stone-700 dark:text-slate-200 rounded-2xl active-press hover:bg-stone-200 flex items-center gap-1.5 text-xs font-bold transition-all"
           >
-            Settings
+            <Save className="h-4 w-4" /> Save & Exit
           </button>
         </div>
       </div>
 
       {/* ============================================================
-         1. BASIC INFORMATION CARD (DISPLAY MODE / EDIT MODE TOGGLE)
+         1. BASIC INFORMATION CARD (Parent & Sitter)
          ============================================================ */}
-      <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm transition-all">
+      <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-xs transition-all">
         <div className="flex items-center justify-between border-b border-stone-100 dark:border-slate-800 pb-4 mb-4">
           <h2 className="font-display text-base font-bold text-heading dark:text-white flex items-center gap-2">
-            <User className="h-5 w-5 text-primary" /> Basic Information
+            <User className="h-5 w-5 text-primary" /> 
+            {role === 'parent' ? 'Parent & Household Profile' : 'Basic Information'}
           </h2>
 
           {!isEditingBasic ? (
@@ -351,68 +584,57 @@ export default function ProfilePage() {
                 setDraftAvatarUrl(avatarUrl);
                 setIsEditingBasic(true);
               }}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-stone-100 dark:bg-slate-800 hover:bg-stone-200 text-stone-700 dark:text-slate-200 rounded-xl text-xs font-bold active-press transition-colors"
+              className="px-3.5 py-1.5 border border-stone-200 dark:border-slate-700 text-stone-700 dark:text-slate-200 text-xs font-bold rounded-xl hover:bg-stone-50 dark:hover:bg-slate-800 active-press transition-colors flex items-center gap-1.5"
             >
-              <Pencil className="h-3.5 w-3.5 text-primary" /> Edit Info
+              <Pencil className="h-3.5 w-3.5" /> Edit Basic Info
             </button>
           ) : (
-            <button
-              type="button"
-              onClick={() => setIsEditingBasic(false)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-stone-100 dark:bg-slate-800 hover:bg-stone-200 text-stone-600 dark:text-slate-300 rounded-xl text-xs font-bold active-press transition-colors"
-            >
-              <X className="h-3.5 w-3.5" /> Cancel
-            </button>
+            <span className="text-xs font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-1 rounded-lg">
+              Editing Mode
+            </span>
           )}
         </div>
 
-        {/* DISPLAY MODE */}
         {!isEditingBasic ? (
           <div className="space-y-4">
-            <div className="flex items-center gap-4 p-4 bg-stone-50 dark:bg-slate-800/60 rounded-2xl border border-stone-100 dark:border-slate-800">
-              {avatarUrl ? (
-                <img
-                  src={avatarUrl}
-                  alt={firstName}
-                  className="w-16 h-16 rounded-2xl object-cover border-2 border-primary/20 shrink-0"
-                  onError={(e) => (e.currentTarget.style.display = 'none')}
-                />
-              ) : (
-                <div className="w-16 h-16 rounded-2xl bg-primary/10 text-primary font-black flex items-center justify-center text-xl shrink-0">
-                  {firstName?.[0] || 'U'}
-                </div>
-              )}
-
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-display text-lg font-black text-heading dark:text-white">
-                    {firstName} {lastName}
-                  </h3>
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
-                    {role || 'User'}
+            <div className="flex items-center gap-4">
+              <img
+                src={avatarUrl || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150'}
+                alt={`${firstName} ${lastName}`}
+                className="w-16 h-16 rounded-2xl object-cover border-2 border-stone-200 dark:border-slate-700 shadow-2xs"
+              />
+              <div>
+                <h3 className="font-bold text-base text-heading dark:text-white">{firstName} {lastName}</h3>
+                <p className="text-xs text-stone-500 dark:text-slate-400">{userEmail}</p>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="inline-block px-2.5 py-0.5 bg-stone-100 dark:bg-slate-800 text-stone-600 dark:text-slate-300 text-[10px] font-extrabold rounded-md uppercase tracking-wider">
+                    Role: {role === 'parent' ? 'Family Parent' : role}
                   </span>
-                </div>
-                <div className="flex items-center gap-1.5 text-xs text-stone-400">
-                  <Mail className="h-3.5 w-3.5" /> {userEmail}
+                  {(role === 'parent' ? (parentCity || parentHomeArea) : city) && (
+                    <span className="text-xs font-semibold text-stone-500 flex items-center gap-1">
+                      <MapPin className="h-3.5 w-3.5 text-emerald-600" />
+                      {role === 'parent'
+                        ? `${parentCity || parentHomeArea.split(',')[0]}${parentProvince ? ', ' + parentProvince : ''}`
+                        : `${city}${province ? ', ' + province : ''}`
+                      }
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
 
-            <div className="space-y-1.5">
-              <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block">About Me / Bio</span>
-              <div className="p-4 bg-stone-50/70 dark:bg-slate-800/40 rounded-2xl border border-stone-100 dark:border-slate-800 text-xs text-stone-700 dark:text-slate-200 leading-relaxed">
-                {bio ? (
-                  <p className="whitespace-pre-line">{bio}</p>
-                ) : (
-                  <p className="italic text-stone-400">No biography provided yet. Click "Edit Info" above to add details about yourself.</p>
-                )}
-              </div>
+            <div>
+              <h4 className="text-[10px] font-extrabold text-stone-400 uppercase tracking-wider mb-1">
+                {role === 'parent' ? 'About Our Family' : 'Biography / About Me'}
+              </h4>
+              <p className="text-xs text-stone-700 dark:text-slate-200 leading-relaxed font-medium">
+                {bio || <span className="text-stone-400 italic">No family overview provided yet. Click 'Edit Basic Info' to share info with caregivers.</span>}
+              </p>
             </div>
           </div>
         ) : (
-          /* EDIT MODE FORM */
           <form onSubmit={handleSaveBasicInfo} className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">First Name</label>
                 <input
@@ -436,23 +658,25 @@ export default function ProfilePage() {
             </div>
 
             <div>
-              <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Avatar Image URL</label>
+              <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Avatar / Profile Photo URL</label>
               <input
-                type="text"
+                type="url"
                 value={draftAvatarUrl}
                 onChange={(e) => setDraftAvatarUrl(e.target.value)}
-                placeholder="https://images.unsplash.com/photo..."
+                placeholder="https://..."
                 className="w-full p-3.5 rounded-2xl border border-stone-200 dark:border-slate-700 text-xs bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary"
               />
             </div>
 
             <div>
-              <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">About Me / Biography</label>
+              <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">
+                {role === 'parent' ? 'About Our Family' : 'About Me / Biography'}
+              </label>
               <textarea
                 value={draftBio}
                 onChange={(e) => setDraftBio(e.target.value)}
                 rows={4}
-                placeholder="Tell other parents or caregivers about yourself..."
+                placeholder={role === 'parent' ? 'Tell sitters about your family, kids, interests, and home environment...' : 'Tell families about your background...'}
                 className="w-full p-3.5 rounded-2xl border border-stone-200 dark:border-slate-700 text-xs bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary resize-none"
               />
             </div>
@@ -478,276 +702,215 @@ export default function ProfilePage() {
       </div>
 
       {/* ============================================================
-         2. SITTER SPECIFIC: MANAGE SHIFTS & AVAILABILITY WIDGET
+         PARENTS EXCLUSIVE SECTION 1: CHILDREN & FAMILY MEMBERS CARD
          ============================================================ */}
-      {role === 'sitter' && (
-        <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
+      {role === 'parent' && (
+        <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-xs space-y-4">
           <div className="flex items-center justify-between border-b border-stone-100 dark:border-slate-800 pb-3">
             <div>
               <h3 className="font-display text-base font-bold text-heading dark:text-white flex items-center gap-2">
-                <Calendar className="h-5 w-5 text-primary" /> Manage Shifts & Availability
+                <Baby className="h-5 w-5 text-primary" /> Children & Family Members
               </h3>
-              <p className="text-xs text-stone-400 mt-0.5">Configure your weekly working schedule and block vacation dates.</p>
+              <p className="text-xs text-stone-400 mt-0.5">Manage your children's profiles, age groups, allergies, and care notes.</p>
             </div>
             <button
-              onClick={() => router.push('/availability')}
-              className="px-4 py-2.5 bg-primary text-white rounded-2xl text-xs font-bold hover:bg-emerald-800 active-press transition-colors flex items-center gap-1.5 shadow-sm shrink-0"
+              onClick={openAddChildModal}
+              className="px-3.5 py-1.5 bg-primary text-white rounded-xl text-xs font-bold hover:bg-emerald-800 active-press transition-all flex items-center gap-1 shrink-0 shadow-2xs"
             >
-              <Calendar className="h-4 w-4" /> Manage Shifts & Calendar
+              <Plus className="h-4 w-4" /> Add Child
             </button>
           </div>
 
-          <div className="bg-stone-50 dark:bg-slate-800/60 p-4 rounded-2xl border border-stone-100 dark:border-slate-800">
-            <h4 className="text-xs font-bold text-stone-500 dark:text-slate-400 uppercase tracking-wider mb-2">Weekly Schedule Overview</h4>
-            {availRules.length === 0 ? (
-              <p className="text-xs text-stone-400 italic">No recurring shift rules set up yet. Click 'Manage Shifts' above to configure your calendar.</p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {availRules.map((rule) => (
-                  <div key={rule.id || rule.day} className="px-3 py-2 bg-white dark:bg-slate-900 rounded-xl border border-stone-200 dark:border-slate-700 text-xs font-semibold">
-                    <span className="text-primary font-bold">{DAY_NAMES[rule.day]}:</span> {rule.startTime} - {rule.endTime}
-                  </div>
-                ))}
+          {children.length === 0 ? (
+            <div className="p-8 text-center bg-stone-50 dark:bg-slate-800/50 border border-dashed border-stone-200 dark:border-slate-700 rounded-2xl space-y-3">
+              <div className="inline-flex p-3 bg-primary/10 rounded-2xl text-primary">
+                <Baby className="h-8 w-8" />
               </div>
+              <div>
+                <h4 className="font-bold text-sm text-heading dark:text-white">No Children Profiles Added Yet</h4>
+                <p className="text-xs text-stone-400 mt-1 max-w-sm mx-auto">
+                  Adding your children's details helps caregivers prepare dietary preferences, allergy precautions, and age-appropriate routines.
+                </p>
+              </div>
+              <button
+                onClick={openAddChildModal}
+                className="px-4 py-2 bg-primary text-white rounded-xl text-xs font-bold hover:bg-emerald-800 active-press transition-all inline-flex items-center gap-1.5"
+              >
+                <Plus className="h-4 w-4" /> Add First Child Profile
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              {children.map((child) => (
+                <div key={child.id} className="p-4 bg-stone-50 dark:bg-slate-800/80 rounded-2xl border border-stone-200 dark:border-slate-700 space-y-2.5 relative">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="p-2.5 bg-white dark:bg-slate-900 rounded-xl text-primary border border-stone-200 dark:border-slate-700 shadow-2xs">
+                        <Baby className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-heading dark:text-white">{child.first_name}</h4>
+                        <span className="inline-block px-2 py-0.5 bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 text-[10px] font-extrabold rounded-md">
+                          {child.age_group || 'Child'}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => openEditChildModal(child)}
+                        className="p-1.5 text-stone-400 hover:text-primary transition-colors"
+                        title="Edit child"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteChild(child.id, child.first_name)}
+                        className="p-1.5 text-stone-400 hover:text-red-500 transition-colors"
+                        title="Delete child"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5 text-xs text-stone-600 dark:text-slate-300 font-medium">
+                    {child.date_of_birth && (
+                      <div className="flex items-center gap-1.5 text-[11px]">
+                        <Calendar className="h-3.5 w-3.5 text-stone-400" />
+                        <span>DOB: {child.date_of_birth}</span>
+                      </div>
+                    )}
+                    {child.allergies && (
+                      <div className="p-2 bg-red-50 dark:bg-red-950/40 border border-red-100 dark:border-red-900/60 rounded-xl text-red-800 dark:text-red-300 text-[11px] flex items-start gap-1.5 font-bold">
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-red-600" />
+                        <span>Allergies: {child.allergies}</span>
+                      </div>
+                    )}
+                    {child.medications && (
+                      <div className="p-2 bg-blue-50 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900/60 rounded-xl text-blue-800 dark:text-blue-300 text-[11px] flex items-start gap-1.5 font-bold">
+                        <Stethoscope className="h-3.5 w-3.5 shrink-0 mt-0.5 text-blue-600" />
+                        <span>Meds: {child.medications}</span>
+                      </div>
+                    )}
+                    {child.special_instructions && (
+                      <p className="text-[11px] text-stone-500 dark:text-slate-400 bg-white dark:bg-slate-900 p-2 rounded-xl border border-stone-100 dark:border-slate-800">
+                        💬 {child.special_instructions}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ============================================================
+         PARENTS EXCLUSIVE SECTION 2: EMERGENCY CONTACTS & HOUSE DETAILS
+         ============================================================ */}
+      {role === 'parent' && (
+        <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-xs space-y-4">
+          <div className="flex items-center justify-between border-b border-stone-100 dark:border-slate-800 pb-3">
+            <div>
+              <h3 className="font-display text-base font-bold text-heading dark:text-white flex items-center gap-2">
+                <Phone className="h-5 w-5 text-emerald-600" /> Emergency Contact & Household Instructions
+              </h3>
+              <p className="text-xs text-stone-400 mt-0.5">Contact details and house rules shared securely with confirmed sitters.</p>
+            </div>
+            {!isEditingEmergency ? (
+              <button
+                onClick={() => setIsEditingEmergency(true)}
+                className="px-3.5 py-1.5 border border-stone-200 dark:border-slate-700 text-stone-700 dark:text-slate-200 text-xs font-bold rounded-xl hover:bg-stone-50 dark:hover:bg-slate-800 active-press transition-colors flex items-center gap-1.5"
+              >
+                <Pencil className="h-3.5 w-3.5" /> Edit Emergency Details
+              </button>
+            ) : (
+              <span className="text-xs font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-1 rounded-lg">
+                Editing Mode
+              </span>
             )}
           </div>
-        </div>
-      )}
 
-      {/* ============================================================
-         3. SITTER SPECIFIC: STRIPE PAYOUT & EARNINGS SETUP
-         ============================================================ */}
-      {role === 'sitter' && (
-        <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-stone-100 dark:border-slate-800 pb-3 gap-3">
-            <div>
-              <h3 className="font-display text-base font-bold text-heading dark:text-white flex items-center gap-2">
-                <CreditCard className="h-5 w-5 text-teal-600" /> Stripe Payout Setup
-              </h3>
-              <p className="text-xs text-stone-400 mt-0.5">
-                {stripeConnected 
-                  ? 'Your bank account is connected via Stripe Express to receive direct deposits.'
-                  : 'Connect your bank account to receive direct deposits for completed bookings.'}
-              </p>
-            </div>
-
-            <button
-              onClick={async () => {
-                try {
-                  setSaving(true);
-                  toast.info(stripeConnected ? 'Opening Stripe Account Manager...' : 'Initiating Stripe Connect Express setup...');
-                  const res = await fetch('/api/connect/onboarding-link', { method: 'POST' });
-                  const data = await res.json();
-                  if (!res.ok) throw new Error(data.error || 'Failed to start Stripe onboarding.');
-                  
-                  if (data.url) {
-                    toast.success('Redirecting to Stripe Express...');
-                    window.location.href = data.url;
-                  }
-                } catch (err: any) {
-                  toast.error(err.message || 'Stripe Connect error.');
-                } finally {
-                  setSaving(false);
-                }
-              }}
-              disabled={saving}
-              className={`px-4 py-2.5 rounded-2xl text-xs font-bold active-press transition-colors flex items-center gap-1.5 shadow-sm shrink-0 disabled:opacity-50 ${
-                stripeConnected 
-                  ? 'bg-emerald-700 hover:bg-emerald-800 text-white' 
-                  : 'bg-teal-600 hover:bg-teal-700 text-white'
-              }`}
-            >
-              {saving ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : stripeConnected ? (
-                <>
-                  <Check className="h-4 w-4" /> Manage Stripe Account
-                </>
-              ) : (
-                <>
-                  <CreditCard className="h-4 w-4" /> Connect Stripe Express
-                </>
-              )}
-            </button>
-          </div>
-
-          <div className={`p-3.5 rounded-2xl flex items-center justify-between text-xs border ${
-            stripeConnected 
-              ? 'bg-emerald-50/60 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900' 
-              : 'bg-teal-50/50 dark:bg-teal-950/40 border-teal-100 dark:border-teal-900'
-          }`}>
-            <span className={`font-semibold ${stripeConnected ? 'text-emerald-950 dark:text-emerald-200' : 'text-teal-900 dark:text-teal-200'}`}>
-              {stripeConnected 
-                ? `✓ Connected (${stripeAccountId || 'Stripe Express Direct Deposit'})` 
-                : 'Automatic Direct Deposit Payouts (CAD)'}
-            </span>
-            <span className={`px-2.5 py-1 rounded-md font-bold text-[10px] ${
-              stripeConnected 
-                ? 'bg-emerald-200 dark:bg-emerald-900 text-emerald-900 dark:text-emerald-100' 
-                : 'bg-teal-200 dark:bg-teal-900 text-teal-900 dark:text-teal-100'
-            }`}>
-              {stripeConnected ? 'Connected & Verified' : 'Setup Pending'}
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* PARENT SPECIFIC: SAVED PAYMENT METHODS */}
-      {role === 'parent' && (
-        <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-stone-100 dark:border-slate-800 pb-3">
-            <div>
-              <h3 className="font-display text-base font-bold text-heading dark:text-white flex items-center gap-2">
-                <CreditCard className="h-5 w-5 text-primary" /> Saved Payment Methods
-              </h3>
-              <p className="text-xs text-stone-400 mt-0.5">Manage credit cards used for booking childcare appointments.</p>
-            </div>
-            <button
-              onClick={() => setShowPaymentModal(true)}
-              className="px-3.5 py-1.5 bg-primary text-white rounded-xl text-xs font-bold hover:bg-emerald-800 active-press transition-colors"
-            >
-              + Manage Cards
-            </button>
-          </div>
-
-          <div className="p-4 bg-stone-50 dark:bg-slate-800/60 rounded-2xl border border-stone-200 dark:border-slate-700 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-white dark:bg-slate-900 rounded-xl border border-stone-200 dark:border-slate-700 font-black text-xs">
-                💳 VISA
+          {!isEditingEmergency ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div className="p-4 bg-stone-50 dark:bg-slate-800/60 rounded-2xl border border-stone-100 dark:border-slate-800 space-y-1.5">
+                <span className="font-bold text-stone-400 uppercase tracking-wider text-[10px] block">Primary Emergency Contact</span>
+                <span className="font-extrabold text-heading dark:text-white block text-sm">
+                  {emergencyContactName || <span className="text-stone-400 italic">Not set</span>}
+                </span>
+                <span className="text-stone-600 dark:text-slate-300 font-medium block">
+                  📞 {emergencyContactPhone || 'No phone provided'}
+                </span>
               </div>
-              <div>
-                <strong className="block text-xs font-bold text-heading dark:text-white">Visa ending in 4242</strong>
-                <span className="text-[10px] text-stone-400">Expires 12/28 · Default Payment Method</span>
-              </div>
-            </div>
-            <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 rounded-lg text-[10px] font-bold">
-              Default
-            </span>
-          </div>
-        </div>
-      )}
 
-      <PaymentMethodsModal
-        isOpen={showPaymentModal}
-        onClose={() => setShowPaymentModal(false)}
-      />
-
-      {/* ============================================================
-         4. SITTER SPECIFIC: CARE GALLERY & MEDIA PHOTOS MANAGER
-         ============================================================ */}
-      {role === 'sitter' && (
-        <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-6">
-          <div className="flex items-center justify-between border-b border-stone-100 dark:border-slate-800 pb-4">
-            <div>
-              <h3 className="font-display text-base font-bold text-heading dark:text-white flex items-center gap-2">
-                <ImageIcon className="h-5 w-5 text-primary" /> Care Gallery & Media Photos
-              </h3>
-              <p className="text-xs text-stone-400 mt-0.5">Showcase your care environment, activities, and background photos.</p>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setIsEditingGallery(!isEditingGallery)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-stone-100 dark:bg-slate-800 hover:bg-stone-200 text-stone-700 dark:text-slate-200 rounded-xl text-xs font-bold active-press transition-colors shrink-0"
-            >
-              <Pencil className="h-3.5 w-3.5 text-primary" /> {isEditingGallery ? 'Close Gallery Editor' : 'Edit Gallery Photos'}
-            </button>
-          </div>
-
-          {/* DISPLAY MODE PREVIEW */}
-          {!isEditingGallery ? (
-            <div className="space-y-4">
-              {/* Cover Banner Preview */}
-              {coverUrl && (
-                <div>
-                  <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block mb-1.5">Profile Banner Image</span>
-                  <img src={coverUrl} alt="Banner Cover" className="w-full h-36 rounded-2xl object-cover border border-stone-200 dark:border-slate-700 shadow-xs" onError={(e) => (e.currentTarget.style.display = 'none')} />
-                </div>
-              )}
-
-              {/* Gallery Grid Preview */}
-              <div>
-                <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block mb-1.5">Care Photo Showcase</span>
-                {galleryUrls.filter(Boolean).length === 0 ? (
-                  <p className="text-xs text-stone-400 italic bg-stone-50 dark:bg-slate-800/40 p-4 rounded-2xl border border-stone-100 dark:border-slate-800">
-                    No care gallery photos added yet. Click "Edit Gallery Photos" above to add photo URLs!
-                  </p>
-                ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                    {galleryUrls.filter(Boolean).map((url, i) => (
-                      <img
-                        key={i}
-                        src={url}
-                        alt={`Care photo ${i + 1}`}
-                        className="w-full h-28 rounded-2xl object-cover border border-stone-200 dark:border-slate-700 hover-scale"
-                        onError={(e) => (e.currentTarget.style.display = 'none')}
-                      />
-                    ))}
-                  </div>
-                )}
+              <div className="p-4 bg-stone-50 dark:bg-slate-800/60 rounded-2xl border border-stone-100 dark:border-slate-800 space-y-1.5">
+                <span className="font-bold text-stone-400 uppercase tracking-wider text-[10px] block">Pets & Household Info</span>
+                <span className="text-stone-700 dark:text-slate-200 font-medium block">
+                  🐾 Pets: {petsInfo || 'None specified'}
+                </span>
+                <span className="text-stone-500 dark:text-slate-400 text-[11px] block">
+                  📋 Rules: {houseRules || 'Standard NestCare house safety rules apply.'}
+                </span>
               </div>
             </div>
           ) : (
-            /* EDIT MODE FORM FOR GALLERY */
-            <form onSubmit={handleSaveProDetails} className="space-y-6">
+            <form onSubmit={handleSaveEmergencyContact} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Emergency Contact Name</label>
+                  <input
+                    type="text"
+                    value={emergencyContactName}
+                    onChange={(e) => setEmergencyContactName(e.target.value)}
+                    placeholder="e.g. Grandma Mary / Doctor Smith"
+                    className="w-full p-3.5 rounded-2xl border border-stone-200 dark:border-slate-700 text-xs bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Emergency Contact Phone</label>
+                  <input
+                    type="tel"
+                    value={emergencyContactPhone}
+                    onChange={(e) => setEmergencyContactPhone(e.target.value)}
+                    placeholder="+1 (555) 019-2831"
+                    className="w-full p-3.5 rounded-2xl border border-stone-200 dark:border-slate-700 text-xs bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary"
+                  />
+                </div>
+              </div>
+
               <div>
-                <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Banner Cover Image URL</label>
+                <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Pets Information</label>
                 <input
                   type="text"
-                  value={coverUrl}
-                  onChange={(e) => setCoverUrl(e.target.value)}
-                  placeholder="https://images.unsplash.com/..."
+                  value={petsInfo}
+                  onChange={(e) => setPetsInfo(e.target.value)}
+                  placeholder="e.g. 1 friendly Golden Retriever (Luna), 1 indoor cat"
                   className="w-full p-3.5 rounded-2xl border border-stone-200 dark:border-slate-700 text-xs bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary"
                 />
               </div>
 
-              <div className="space-y-3">
-                <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Care Gallery Photo URLs</label>
-                {galleryUrls.map((url, idx) => (
-                  <div key={idx} className="flex gap-2 items-center">
-                    <input
-                      type="text"
-                      value={url}
-                      onChange={(e) => {
-                        const newUrls = [...galleryUrls];
-                        newUrls[idx] = e.target.value;
-                        setGalleryUrls(newUrls);
-                      }}
-                      placeholder={`Photo ${idx + 1} URL (https://...)`}
-                      className="flex-1 p-3.5 rounded-2xl border border-stone-200 dark:border-slate-700 text-xs bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary"
-                    />
-                    {galleryUrls.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => setGalleryUrls(galleryUrls.filter((_, i) => i !== idx))}
-                        className="p-3.5 bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-300 rounded-2xl text-xs font-bold hover:bg-red-100 active-press transition-colors"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-
-                <button
-                  type="button"
-                  onClick={() => setGalleryUrls([...galleryUrls, ''])}
-                  className="w-full py-3 border border-dashed border-stone-300 dark:border-slate-700 hover:border-primary text-stone-500 dark:text-slate-300 hover:text-primary rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-1.5"
-                >
-                  <Plus className="h-4 w-4" /> Add Another Care Photo URL
-                </button>
+              <div>
+                <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Household Rules & Entry Instructions</label>
+                <textarea
+                  value={houseRules}
+                  onChange={(e) => setHouseRules(e.target.value)}
+                  rows={3}
+                  placeholder="e.g. Wi-Fi code, bedtime routines, screen time limits, keyless door code..."
+                  className="w-full p-3.5 rounded-2xl border border-stone-200 dark:border-slate-700 text-xs bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary resize-none"
+                />
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex gap-2 pt-2">
                 <button
                   type="submit"
                   disabled={saving}
                   className="flex-1 py-3 bg-primary text-white text-xs font-bold rounded-2xl active-press hover:bg-emerald-800 disabled:opacity-50 transition-colors flex justify-center items-center gap-1.5"
                 >
-                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Save className="h-4 w-4" /> Save Care Gallery</>}
+                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Check className="h-4 w-4" /> Save Emergency Details</>}
                 </button>
                 <button
                   type="button"
-                  onClick={() => setIsEditingGallery(false)}
+                  onClick={() => setIsEditingEmergency(false)}
                   className="px-5 py-3 bg-stone-100 dark:bg-slate-800 text-stone-600 dark:text-slate-300 text-xs font-bold rounded-2xl hover:bg-stone-200 active-press transition-colors"
                 >
                   Cancel
@@ -758,362 +921,432 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {/* Parent-specific Dashboard Details */}
+      {/* ============================================================
+         PARENTS EXCLUSIVE SECTION 3: SAVED CAREGIVERS & FAVORITES
+         ============================================================ */}
       {role === 'parent' && (
-        <div className="space-y-6">
-          {/* Registered Children */}
-          <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
-            <div className="flex items-center justify-between border-b border-stone-100 dark:border-slate-800 pb-3">
-              <h3 className="font-display text-sm font-bold text-heading dark:text-white flex items-center gap-2">
-                <Baby className="h-5 w-5 text-primary" /> Registered Children
+        <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-xs space-y-4">
+          <div className="flex items-center justify-between border-b border-stone-100 dark:border-slate-800 pb-3">
+            <div>
+              <h3 className="font-display text-base font-bold text-heading dark:text-white flex items-center gap-2">
+                <Heart className="h-5 w-5 text-red-500 fill-red-500" /> Saved Caregivers & Favorites
               </h3>
-              <button
-                type="button"
-                onClick={() => router.push('/settings')}
-                className="text-[10px] font-bold text-primary hover:underline"
-              >
-                Manage Children
-              </button>
+              <p className="text-xs text-stone-400 mt-0.5">Quick access to your preferred, bookmarked sitters.</p>
             </div>
-
-            {children.length === 0 ? (
-              <p className="text-xs text-stone-400 italic">No child profiles registered yet. Add them in settings.</p>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {children.map((child) => {
-                  const age = new Date().getFullYear() - new Date(child.date_of_birth).getFullYear();
-                  return (
-                    <div 
-                      key={child.id} 
-                      className="p-3.5 bg-stone-50 dark:bg-slate-800/60 border border-stone-150 dark:border-slate-700 rounded-2xl flex items-center gap-3"
-                    >
-                      <span className="p-2.5 bg-primary/10 rounded-xl text-primary font-display font-black text-sm shrink-0">
-                        👶
-                      </span>
-                      <div>
-                        <strong className="block text-xs text-heading dark:text-white font-black">{child.first_name}</strong>
-                        <span className="text-[10px] text-stone-400 font-semibold">{age} years old</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            <button
+              onClick={() => router.push('/search')}
+              className="px-3.5 py-1.5 border border-stone-200 dark:border-slate-700 text-stone-700 dark:text-slate-200 rounded-xl text-xs font-bold hover:bg-stone-50 dark:hover:bg-slate-800 active-press transition-all flex items-center gap-1 shrink-0"
+            >
+              Browse Sitters <ChevronRight className="h-3.5 w-3.5" />
+            </button>
           </div>
 
-          {/* Saved Sitters Grid */}
-          <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
-            <div className="flex items-center justify-between border-b border-stone-100 dark:border-slate-800 pb-3">
-              <h3 className="font-display text-sm font-bold text-heading dark:text-white flex items-center gap-2">
-                <Heart className="h-5 w-5 text-red-500 fill-red-500" /> Saved Sitter Favorites
+          {savedSitters.length === 0 ? (
+            <div className="p-6 text-center bg-stone-50 dark:bg-slate-800/50 rounded-2xl border border-stone-100 dark:border-slate-800 space-y-2">
+              <p className="text-xs text-stone-400 font-medium">You haven't saved any caregivers yet. Click the heart icon on any sitter's card to bookmark them for easy repeat booking.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              {savedSitters.map((sitter) => (
+                <div key={sitter.id} className="p-4 bg-stone-50 dark:bg-slate-800/70 rounded-2xl border border-stone-200 dark:border-slate-700 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <img
+                      src={sitter.avatar_url}
+                      alt={sitter.name}
+                      className="w-12 h-12 rounded-2xl object-cover border border-stone-200 dark:border-slate-700 shrink-0"
+                    />
+                    <div>
+                      <h4 className="font-bold text-xs text-heading dark:text-white">{sitter.name}</h4>
+                      <p className="text-[11px] text-stone-500 dark:text-slate-400 font-semibold">${sitter.hourly_rate}/hr • {sitter.city}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      onClick={() => router.push(`/sitter/${sitter.id}`)}
+                      className="px-3 py-1.5 bg-primary text-white text-[11px] font-bold rounded-xl hover:bg-emerald-800 active-press transition-colors"
+                    >
+                      Book
+                    </button>
+                    <button
+                      onClick={() => handleRemoveFavorite(sitter.id, sitter.name)}
+                      className="p-1.5 text-red-500 hover:bg-red-50 rounded-xl transition-colors"
+                      title="Remove from favorites"
+                    >
+                      <Heart className="h-4 w-4 fill-red-500" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ============================================================
+         PARENTS EXCLUSIVE SECTION 4: SAVED PAYMENT METHODS
+         ============================================================ */}
+      {role === 'parent' && (
+        <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-stone-100 dark:border-slate-800 pb-3 gap-3">
+            <div>
+              <h3 className="font-display text-base font-bold text-heading dark:text-white flex items-center gap-2">
+                <CreditCard className="h-5 w-5 text-teal-600" /> Payment & Billing Methods
               </h3>
-              <button
-                type="button"
-                onClick={() => router.push('/search')}
-                className="text-[10px] font-bold text-primary hover:underline"
-              >
-                Find Sitters
-              </button>
+              <p className="text-xs text-stone-400 mt-0.5">Manage credit cards on file for seamless booking authorizations.</p>
             </div>
 
-            {savedSitters.length === 0 ? (
-              <p className="text-xs text-stone-400 italic">You haven't favorited any sitters yet. Search to find care!</p>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {savedSitters.map((sitter) => (
-                  <button
-                    key={sitter.id}
-                    type="button"
-                    onClick={() => router.push(`/sitter/${sitter.id}`)}
-                    className="p-3.5 bg-stone-50 dark:bg-slate-800/60 border border-stone-150 dark:border-slate-700 hover:border-primary rounded-2xl flex items-center gap-3 text-left transition-all active-press w-full"
-                  >
-                    <img 
-                      src={sitter.avatar_url} 
-                      alt={sitter.name} 
-                      className="w-10 h-10 rounded-xl object-cover border border-stone-200 dark:border-slate-700" 
-                    />
-                    <div className="min-w-0 flex-1">
-                      <strong className="block text-xs text-heading dark:text-white font-black truncate">{sitter.name}</strong>
-                      <span className="text-[10px] text-stone-400 block font-semibold">
-                        ${sitter.hourly_rate}/hr • {sitter.years_experience} yrs exp
-                      </span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
+            <button
+              onClick={() => setShowPaymentModal(true)}
+              className="px-4 py-2.5 bg-primary text-white rounded-2xl text-xs font-bold hover:bg-emerald-800 active-press transition-all flex items-center gap-1.5 shadow-2xs shrink-0"
+            >
+              <CreditCard className="h-4 w-4" />
+              <span>Manage Payment Methods</span>
+            </button>
           </div>
         </div>
       )}
 
-      {/* Sitter Professional Details */}
-      {role === 'sitter' && (
-        <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-6">
+      {/* ============================================================
+         PARENTS EXCLUSIVE SECTION 5: HOME LOCATION
+         ============================================================ */}
+      {role === 'parent' && (
+        <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-xs space-y-4">
           <div className="flex items-center justify-between border-b border-stone-100 dark:border-slate-800 pb-3">
-            <h3 className="font-display text-sm font-bold text-heading dark:text-white flex items-center gap-2">
-              <ShieldCheck className="h-5 w-5 text-primary" /> Professional Caregiver Details
-            </h3>
-            <button
-              type="button"
-              onClick={() => setIsEditingPro(!isEditingPro)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-stone-100 dark:bg-slate-800 hover:bg-stone-200 text-stone-700 dark:text-slate-200 rounded-xl text-xs font-bold active-press transition-colors"
-            >
-              <Pencil className="h-3.5 w-3.5 text-primary" /> {isEditingPro ? 'Close Editor' : 'Edit Professional Info'}
-            </button>
+            <div>
+              <h3 className="font-display text-base font-bold text-heading dark:text-white flex items-center gap-2">
+                <Home className="h-5 w-5 text-primary" /> Home Location
+              </h3>
+              <p className="text-xs text-stone-400 mt-0.5">
+                Set your home location so sitter searches are automatically centred on your neighbourhood.
+              </p>
+            </div>
+            {!isEditingParentLocation ? (
+              <button
+                type="button"
+                onClick={() => setIsEditingParentLocation(true)}
+                className="px-3.5 py-1.5 border border-stone-200 dark:border-slate-700 text-stone-700 dark:text-slate-200 text-xs font-bold rounded-xl hover:bg-stone-50 dark:hover:bg-slate-800 active-press transition-colors flex items-center gap-1.5 shrink-0"
+              >
+                <Pencil className="h-3.5 w-3.5" /> {parentLat ? 'Update Location' : 'Set Location'}
+              </button>
+            ) : (
+              <span className="text-xs font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-1 rounded-lg shrink-0">
+                Editing
+              </span>
+            )}
           </div>
 
-          <form onSubmit={handleSaveProDetails} className="space-y-6">
+          {!isEditingParentLocation ? (
             <div>
-              <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Headline / Title</label>
-              <input
-                type="text"
-                disabled={!isEditingPro}
-                value={headline}
-                onChange={(e) => setHeadline(e.target.value)}
-                placeholder="Certified Infant Specialist & CPR Trained"
-                className="w-full p-3.5 rounded-2xl border border-stone-200 dark:border-slate-700 text-xs bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary disabled:opacity-80"
-              />
-            </div>
-
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1 flex items-center gap-0.5">
-                  <DollarSign className="h-3 w-3 text-stone-400" /> Rate ($ / hr)
-                </label>
-                <input
-                  type="number"
-                  disabled={!isEditingPro}
-                  value={hourlyRate}
-                  onChange={(e) => setHourlyRate(Number(e.target.value))}
-                  className="w-full p-3.5 rounded-2xl border border-stone-200 dark:border-slate-700 text-xs bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary disabled:opacity-80"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Experience (Yrs)</label>
-                <input
-                  type="number"
-                  disabled={!isEditingPro}
-                  value={yearsExperience}
-                  onChange={(e) => setYearsExperience(Number(e.target.value))}
-                  className="w-full p-3.5 rounded-2xl border border-stone-200 dark:border-slate-700 text-xs bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary disabled:opacity-80"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Max Kids Cap</label>
-                <input
-                  type="number"
-                  disabled={!isEditingPro}
-                  value={maxChildren}
-                  onChange={(e) => setMaxChildren(Number(e.target.value))}
-                  className="w-full p-3.5 rounded-2xl border border-stone-200 dark:border-slate-700 text-xs bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary disabled:opacity-80 font-bold"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Minimum Booking Notice Required</label>
-                <select 
-                  disabled={!isEditingPro}
-                  value={minimumNoticeHours} 
-                  onChange={(e) => setMinimumNoticeHours(Number(e.target.value))}
-                  className="w-full p-3.5 rounded-2xl border border-stone-200 dark:border-slate-700 text-xs bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary disabled:opacity-80 appearance-none font-bold"
-                >
-                  <option value={0}>Same day (no notice required)</option>
-                  <option value={2}>2 hours notice</option>
-                  <option value={6}>6 hours notice</option>
-                  <option value={12}>12 hours notice</option>
-                  <option value={24}>24 hours (1 day) notice</option>
-                  <option value={48}>48 hours (2 days) notice</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Sitter Multiple Children Pricing Config & Preview */}
-            <div className="space-y-4 border-t border-stone-100 dark:border-slate-800 pt-4">
-              <label className="block text-[10px] font-bold text-stone-400 uppercase">Multiple Children Pricing</label>
-              
-              {isEditingPro ? (
-                <div className="space-y-3">
-                  <p className="text-xs text-stone-400 font-semibold">Configure how you charge parents for bookings with multiple children.</p>
-                  
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                    {/* Flat */}
-                    <button
-                      type="button"
-                      onClick={() => setPricingModel('flat')}
-                      className={`p-3.5 border rounded-2xl text-left transition-all active-press flex items-start gap-2.5 w-full ${
-                        pricingModel === 'flat' ? 'border-primary bg-emerald-50/40 dark:bg-emerald-950/20' : 'border-stone-200 dark:border-slate-700 hover:bg-stone-50 dark:hover:bg-slate-800/50'
-                      }`}
-                    >
-                      <div className={`mt-0.5 h-3.5 w-3.5 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                        pricingModel === 'flat' ? 'border-primary text-primary' : 'border-stone-300 dark:border-slate-600'
-                      }`}>
-                        {pricingModel === 'flat' && <div className="h-1.5 w-1.5 rounded-full bg-primary" />}
-                      </div>
-                      <div>
-                        <strong className="block text-xs text-heading dark:text-white">Flat hourly</strong>
-                        <span className="text-[10px] text-stone-400">Same rate for any count.</span>
-                      </div>
-                    </button>
-
-                    {/* Additional Child */}
-                    <button
-                      type="button"
-                      onClick={() => setPricingModel('additional_child')}
-                      className={`p-3.5 border rounded-2xl text-left transition-all active-press flex items-start gap-2.5 w-full ${
-                        pricingModel === 'additional_child' ? 'border-primary bg-emerald-50/40 dark:bg-emerald-950/20' : 'border-stone-200 dark:border-slate-700 hover:bg-stone-50 dark:hover:bg-slate-800/50'
-                      }`}
-                    >
-                      <div className={`mt-0.5 h-3.5 w-3.5 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                        pricingModel === 'additional_child' ? 'border-primary text-primary' : 'border-stone-300 dark:border-slate-600'
-                      }`}>
-                        {pricingModel === 'additional_child' && <div className="h-1.5 w-1.5 rounded-full bg-primary" />}
-                      </div>
-                      <div>
-                        <strong className="block text-xs text-heading dark:text-white">Add-child</strong>
-                        <span className="text-[10px] text-stone-400">Extra fee per extra child.</span>
-                      </div>
-                    </button>
-
-                    {/* Per Child */}
-                    <button
-                      type="button"
-                      onClick={() => setPricingModel('per_child')}
-                      className={`p-3.5 border rounded-2xl text-left transition-all active-press flex items-start gap-2.5 w-full ${
-                        pricingModel === 'per_child' ? 'border-primary bg-emerald-50/40 dark:bg-emerald-950/20' : 'border-stone-200 dark:border-slate-700 hover:bg-stone-50 dark:hover:bg-slate-800/50'
-                      }`}
-                    >
-                      <div className={`mt-0.5 h-3.5 w-3.5 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                        pricingModel === 'per_child' ? 'border-primary text-primary' : 'border-stone-300 dark:border-slate-600'
-                      }`}>
-                        {pricingModel === 'per_child' && <div className="h-1.5 w-1.5 rounded-full bg-primary" />}
-                      </div>
-                      <div>
-                        <strong className="block text-xs text-heading dark:text-white">Per-child</strong>
-                        <span className="text-[10px] text-stone-400">Multiply rate by kids count.</span>
-                      </div>
-                    </button>
-                  </div>
-
-                  {pricingModel === 'additional_child' && (
-                    <div className="p-4 bg-stone-50 dark:bg-slate-800/50 border border-stone-155 dark:border-slate-700 rounded-2xl space-y-2 animate-fadeIn">
-                      <label className="block text-[10px] font-bold text-stone-400 uppercase">
-                        Rate per Additional Child ($/hr)
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={30}
-                        step={0.5}
-                        value={additionalChildRate}
-                        onChange={(e) => setAdditionalChildRate(Number(e.target.value))}
-                        className="p-3 bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-700 text-xs rounded-xl outline-none focus:border-primary w-full max-w-[200px] dark:text-white"
-                        placeholder="e.g. 5"
-                      />
-                      <p className="text-[9px] text-stone-400 font-semibold">Each additional child adds ${additionalChildRate}/hr to your base rate of ${hourlyRate}/hr.</p>
+              {parentLat && parentLng ? (
+                <div className="flex items-center justify-between p-3.5 bg-stone-50 dark:bg-slate-800/60 rounded-2xl border border-stone-100 dark:border-slate-800">
+                  <div className="flex items-center gap-2.5">
+                    <Navigation className="h-4 w-4 text-emerald-600 shrink-0" />
+                    <div>
+                      <span className="font-bold text-sm text-heading dark:text-white block">
+                        {parentHomeArea || `${parentCity}${parentProvince ? ', ' + parentProvince : ''}`}
+                      </span>
+                      <span className="text-[10px] text-stone-400">
+                        GPS: {parentLat.toFixed(4)}, {parentLng.toFixed(4)} · Used to pre-fill search location
+                      </span>
                     </div>
-                  )}
+                  </div>
+                  <span className="px-2.5 py-1 bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-extrabold rounded-full text-[10px]">
+                    ✅ Set
+                  </span>
                 </div>
               ) : (
-                <div className="p-4 bg-stone-50/50 dark:bg-slate-800/30 border border-stone-155 dark:border-slate-800 rounded-2xl text-xs space-y-1.5 font-semibold text-stone-600 dark:text-stone-300">
-                  <div className="flex justify-between items-center">
-                    <span className="text-stone-450">Pricing Model:</span>
-                    <span className="font-bold text-heading dark:text-white capitalize">
-                      {pricingModel === 'flat' ? 'Flat Hourly Rate' : pricingModel === 'additional_child' ? 'Additional Child Pricing' : 'Per Child Pricing'}
-                    </span>
+                <div className="p-5 text-center bg-stone-50 dark:bg-slate-800/50 rounded-2xl border border-dashed border-stone-200 dark:border-slate-700 space-y-2">
+                  <div className="inline-flex p-2.5 bg-primary/10 rounded-xl text-primary">
+                    <MapPin className="h-6 w-6" />
                   </div>
-                  {pricingModel === 'additional_child' && (
-                    <div className="flex justify-between items-center text-stone-400 text-[11px] font-semibold">
-                      <span>Additional Child Rate:</span>
-                      <span className="font-bold text-primary">${additionalChildRate}/hr</span>
-                    </div>
-                  )}
+                  <p className="text-xs text-stone-500 dark:text-slate-400 font-medium">
+                    No home location set yet. Set it so search results always start from your neighbourhood.
+                  </p>
+                  <button
+                    onClick={() => setIsEditingParentLocation(true)}
+                    className="px-4 py-2 bg-primary text-white text-xs font-bold rounded-xl hover:bg-emerald-800 active-press inline-flex items-center gap-1.5"
+                  >
+                    <MapPin className="h-3.5 w-3.5" /> Set Home Location
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <form onSubmit={handleSaveParentLocation} className="space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">
+                  Search Your Home Address or Neighbourhood
+                </label>
+                <LocationAutocompleteInput
+                  value={parentHomeArea}
+                  onChange={(val) => setParentHomeArea(val)}
+                  onSelectSuggestion={(sugg) => {
+                    setParentHomeArea(sugg.address);
+                    setParentCity(sugg.city || sugg.address.split(',')[0]);
+                    setParentProvince(sugg.province || '');
+                    setParentLat(sugg.latitude);
+                    setParentLng(sugg.longitude);
+                  }}
+                  onLocationCommit={(locName) => {
+                    geocodeLocation(locName).then(results => {
+                      if (results.length > 0) {
+                        setParentLat(results[0].latitude);
+                        setParentLng(results[0].longitude);
+                        setParentCity(results[0].city || results[0].displayName.split(',')[0]);
+                        setParentProvince(results[0].province || '');
+                      }
+                    });
+                  }}
+                  placeholder="e.g. Kitsilano, Vancouver or 123 Main St..."
+                />
+              </div>
+
+              {parentLat && parentLng && (
+                <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-bold text-emerald-900 flex items-center gap-1.5">
+                  <MapPin className="h-4 w-4 text-emerald-600 shrink-0" />
+                  📍 Location pinned: {parentHomeArea || parentCity} ({parentLat.toFixed(4)}, {parentLng.toFixed(4)})
                 </div>
               )}
 
-              {/* Live Preview grid */}
-              <div className="bg-stone-50 dark:bg-slate-800/40 p-4 border border-stone-200 dark:border-slate-800 rounded-2xl space-y-2 font-semibold">
-                <span className="block text-[10px] font-bold text-stone-450 uppercase tracking-wide">Live Preview for Parents</span>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-semibold">
-                  {[1, 2, 3, 4].map(numKids => {
-                    let previewRate = hourlyRate;
-                    if (pricingModel === 'additional_child') {
-                      previewRate = hourlyRate + Math.max(0, numKids - 1) * (additionalChildRate || 0);
-                    } else if (pricingModel === 'per_child') {
-                      previewRate = hourlyRate * numKids;
-                    }
-                    const isExceedingCap = numKids > maxChildren;
-                    return (
-                      <div
-                        key={numKids}
-                        className={`p-3 border rounded-xl flex flex-col justify-between ${
-                          isExceedingCap 
-                            ? 'bg-red-50/50 dark:bg-red-950/20 border-red-100 dark:border-red-900 opacity-60 text-red-700 dark:text-red-300' 
-                            : 'bg-white dark:bg-slate-900 border-stone-155 dark:border-slate-700 text-stone-700 dark:text-slate-200'
-                        }`}
-                      >
-                        <div className="flex justify-between items-center mb-1">
-                          <span className="text-[10px] text-stone-400 font-semibold">{numKids} Kid{numKids > 1 ? 's' : ''}</span>
-                          {isExceedingCap && <span className="text-[8px] bg-red-105 dark:bg-red-900 px-1 py-0.5 rounded font-black text-red-800 dark:text-red-100">Cap</span>}
-                        </div>
-                        <span className="font-display font-black text-sm text-heading dark:text-white">${previewRate}/hr</span>
-                      </div>
-                    );
-                  })}
+              <p className="text-[11px] text-stone-400 flex items-start gap-1.5">
+                <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                Your exact address is never shared publicly. Only approximate distances are shown to sitters.
+              </p>
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="submit"
+                  disabled={saving || !parentLat}
+                  className="flex-1 py-3 bg-primary text-white text-xs font-bold rounded-2xl active-press hover:bg-emerald-800 disabled:opacity-50 transition-colors flex justify-center items-center gap-1.5"
+                >
+                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Check className="h-4 w-4" /> Save Home Location</>}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsEditingParentLocation(false)}
+                  className="px-5 py-3 bg-stone-100 dark:bg-slate-800 text-stone-600 dark:text-slate-300 text-xs font-bold rounded-2xl hover:bg-stone-200 active-press transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      )}
+
+      {/* ============================================================
+         SITTER SPECIFIC SECTIONS: LOCATION & RADIUS
+         ============================================================ */}
+      {role === 'sitter' && (
+        <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-xs space-y-4">
+          <div className="flex items-center justify-between border-b border-stone-100 dark:border-slate-800 pb-3">
+            <div>
+              <h3 className="font-display text-base font-bold text-heading dark:text-white flex items-center gap-2">
+                <MapPin className="h-5 w-5 text-emerald-600" /> Service Location & Radius
+              </h3>
+              <p className="text-xs text-stone-400 mt-0.5">Define your primary service city, coordinates, and travel radius.</p>
+            </div>
+            {!isEditingLocation ? (
+              <button
+                type="button"
+                onClick={() => setIsEditingLocation(true)}
+                className="px-3.5 py-1.5 border border-stone-200 dark:border-slate-700 text-stone-700 dark:text-slate-200 text-xs font-bold rounded-xl hover:bg-stone-50 dark:hover:bg-slate-800 active-press transition-colors flex items-center gap-1.5"
+              >
+                <Pencil className="h-3.5 w-3.5" /> Edit Location
+              </button>
+            ) : (
+              <span className="text-xs font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-1 rounded-lg">
+                Editing Location
+              </span>
+            )}
+          </div>
+
+          {!isEditingLocation ? (
+            <div className="space-y-3 text-xs">
+              <div className="flex items-center justify-between p-3.5 bg-stone-50 dark:bg-slate-800/60 rounded-2xl border border-stone-100 dark:border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <Navigation className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <div>
+                    <span className="font-bold text-heading dark:text-white block">
+                      {city || 'City not set'}{province ? `, ${province}` : ''}{serviceArea && serviceArea !== city ? ` (${serviceArea})` : ''}
+                    </span>
+                    <span className="text-[10px] text-stone-400">
+                      {serviceLatitude && serviceLongitude
+                        ? `GPS Coordinates: ${serviceLatitude.toFixed(4)}, ${serviceLongitude.toFixed(4)}`
+                        : 'Coordinates not set yet — Edit to update'}
+                    </span>
+                  </div>
+                </div>
+                <span className="px-3 py-1 bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-extrabold rounded-full text-[11px]">
+                  {serviceRadiusKm} km radius
+                </span>
+              </div>
+            </div>
+          ) : (
+            <form onSubmit={handleSaveLocation} className="space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Search City or Service Address</label>
+                <LocationAutocompleteInput
+                  value={serviceArea}
+                  onChange={(val) => setServiceArea(val)}
+                  onSelectSuggestion={(sugg) => {
+                    setServiceArea(sugg.address);
+                    setCity(sugg.city || sugg.address.split(',')[0]);
+                    setProvince(sugg.province || '');
+                    setServiceLatitude(sugg.latitude);
+                    setServiceLongitude(sugg.longitude);
+                  }}
+                  onLocationCommit={(locName) => {
+                    geocodeLocation(locName).then(results => {
+                      if (results.length > 0) {
+                        setServiceLatitude(results[0].latitude);
+                        setServiceLongitude(results[0].longitude);
+                        setCity(results[0].city || results[0].displayName.split(',')[0]);
+                      }
+                    });
+                  }}
+                  placeholder="Type city or address to search..."
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="flex-1 py-3 bg-primary text-white text-xs font-bold rounded-2xl active-press hover:bg-emerald-800 disabled:opacity-50 transition-colors flex justify-center items-center gap-1.5"
+                >
+                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Check className="h-4 w-4" /> Save Location</>}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsEditingLocation(false)}
+                  className="px-5 py-3 bg-stone-100 dark:bg-slate-800 text-stone-600 dark:text-slate-300 text-xs font-bold rounded-2xl hover:bg-stone-200 active-press transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      )}
+
+      {/* ============================================================
+         CHILD MANAGEMENT MODAL FOR PARENTS
+         ============================================================ */}
+      {showChildModal && (
+        <div className="fixed inset-0 bg-stone-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-lg w-full space-y-4 shadow-xl border border-stone-200 dark:border-slate-800 animate-in fade-in zoom-in duration-200">
+            <div className="flex items-center justify-between border-b border-stone-100 dark:border-slate-800 pb-3">
+              <h3 className="font-display font-black text-base text-heading dark:text-white flex items-center gap-2">
+                <Baby className="h-5 w-5 text-primary" />
+                {editingChildId ? 'Edit Child Profile' : 'Add Child Profile'}
+              </h3>
+              <button
+                onClick={() => setShowChildModal(false)}
+                className="p-1.5 text-stone-400 hover:text-stone-600 dark:hover:text-slate-200"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveChild} className="space-y-3.5">
+              <div>
+                <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Child's First Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={childFirstName}
+                  onChange={(e) => setChildFirstName(e.target.value)}
+                  placeholder="e.g. Oliver"
+                  className="w-full p-3.5 rounded-2xl border border-stone-200 dark:border-slate-700 text-xs bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary font-medium"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Date of Birth (Optional)</label>
+                  <input
+                    type="date"
+                    value={childDob}
+                    onChange={(e) => setChildDob(e.target.value)}
+                    className="w-full p-3 rounded-2xl border border-stone-200 dark:border-slate-700 text-xs bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary font-medium"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Age Group</label>
+                  <select
+                    value={childAgeGroup}
+                    onChange={(e) => setChildAgeGroup(e.target.value)}
+                    className="w-full p-3 rounded-2xl border border-stone-200 dark:border-slate-700 text-xs bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary font-medium"
+                  >
+                    {AGE_GROUPS.map((group) => (
+                      <option key={group} value={group}>{group}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
-            </div>
 
-            {/* Offered Care Services */}
-            <div className="space-y-2 border-t border-stone-100 dark:border-slate-800 pt-4">
-              <label className="block text-[10px] font-bold text-stone-400 uppercase">Offered Care Services</label>
-              <div className="grid grid-cols-2 gap-2">
-                {SERVICES.map((service) => (
-                  <label key={service} className="flex items-center gap-2 text-xs font-semibold text-stone-600 dark:text-slate-300 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      disabled={!isEditingPro}
-                      checked={selectedServices.includes(service)}
-                      onChange={() => handleServiceChange(service)}
-                      className="h-4.5 w-4.5 rounded border-stone-300 text-primary accent-primary disabled:opacity-80"
-                    />
-                    {service}
-                  </label>
-                ))}
+              <div>
+                <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Allergies (If any)</label>
+                <input
+                  type="text"
+                  value={childAllergies}
+                  onChange={(e) => setChildAllergies(e.target.value)}
+                  placeholder="e.g. Peanuts, Dairy, Latex, None"
+                  className="w-full p-3.5 rounded-2xl border border-stone-200 dark:border-slate-700 text-xs bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary font-medium"
+                />
               </div>
-            </div>
 
-            {/* Spoken Languages */}
-            <div className="space-y-2 border-t border-stone-100 dark:border-slate-800 pt-4">
-              <label className="block text-[10px] font-bold text-stone-400 uppercase">Spoken Languages</label>
-              <div className="grid grid-cols-2 gap-2">
-                {LANGUAGES.map((lang) => (
-                  <label key={lang} className="flex items-center gap-2 text-xs font-semibold text-stone-600 dark:text-slate-300 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      disabled={!isEditingPro}
-                      checked={selectedLanguages.includes(lang)}
-                      onChange={() => handleLanguageChange(lang)}
-                      className="h-4.5 w-4.5 rounded border-stone-300 text-primary accent-primary disabled:opacity-80"
-                    />
-                    {lang}
-                  </label>
-                ))}
+              <div>
+                <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Medications & Health Notes</label>
+                <input
+                  type="text"
+                  value={childMedications}
+                  onChange={(e) => setChildMedications(e.target.value)}
+                  placeholder="e.g. EpiPen in kitchen bag, Asthma inhaler"
+                  className="w-full p-3.5 rounded-2xl border border-stone-200 dark:border-slate-700 text-xs bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary font-medium"
+                />
               </div>
-            </div>
 
-            {isEditingPro && (
-              <button
-                type="submit"
-                disabled={saving}
-                className="w-full py-3.5 bg-primary text-white text-xs font-bold rounded-2xl active-press hover:bg-emerald-800 disabled:opacity-50 transition-colors flex justify-center items-center gap-1.5"
-              >
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Save className="h-4.5 w-4.5" /> Save Professional Details</>}
-              </button>
-            )}
-          </form>
+              <div>
+                <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Bedtime Routines & Special Instructions</label>
+                <textarea
+                  value={childInstructions}
+                  onChange={(e) => setChildInstructions(e.target.value)}
+                  rows={3}
+                  placeholder="e.g. Bedtime story at 8 PM, loves building blocks, night light on..."
+                  className="w-full p-3.5 rounded-2xl border border-stone-200 dark:border-slate-700 text-xs bg-stone-50 dark:bg-slate-800 dark:text-white outline-none focus:border-primary resize-none font-medium"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="submit"
+                  disabled={savingChild}
+                  className="flex-1 py-3 bg-primary text-white text-xs font-bold rounded-2xl active-press hover:bg-emerald-800 disabled:opacity-50 transition-colors flex justify-center items-center gap-1.5"
+                >
+                  {savingChild ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Check className="h-4 w-4" /> {editingChildId ? 'Update Child Profile' : 'Add Child Profile'}</>}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowChildModal(false)}
+                  className="px-5 py-3 bg-stone-100 dark:bg-slate-800 text-stone-600 dark:text-slate-300 text-xs font-bold rounded-2xl hover:bg-stone-200 active-press transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
+      )}
+
+      {/* Payment methods modal */}
+      {showPaymentModal && (
+        <PaymentMethodsModal
+          isOpen={showPaymentModal}
+          onClose={() => setShowPaymentModal(false)}
+        />
       )}
     </div>
   );

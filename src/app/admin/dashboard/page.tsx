@@ -422,12 +422,14 @@ export default function AdminDashboardPage() {
 
       if (pricing) {
         setPricingConfig(pricing);
-        setParentFeePct(Number(pricing.parent_service_fee_pct || 10));
-        setSitterCommPct(Number(pricing.sitter_commission_pct || 5));
-        setPlatformPct(Number(pricing.platform_percentage || 15));
-        setMinFee(Number(pricing.min_platform_fee || 2));
-        setMaxFee(Number(pricing.max_platform_fee || 50));
-        setTaxPct(Number(pricing.tax_percentage || 5));
+        const pFee = pricing.parent_service_fee_pct ?? pricing.parent_fee_percentage ?? 10;
+        const sFee = pricing.sitter_commission_pct ?? pricing.sitter_commission_percentage ?? 5;
+        setParentFeePct(Number(pFee));
+        setSitterCommPct(Number(sFee));
+        setPlatformPct(Number(pricing.platform_percentage ?? (Number(pFee) + Number(sFee))));
+        setMinFee(Number(pricing.min_platform_fee ?? 2));
+        setMaxFee(Number(pricing.max_platform_fee ?? 50));
+        setTaxPct(Number(pricing.tax_percentage ?? 5));
       }
 
       // Fetch platform settings for maintenance mode

@@ -52,6 +52,8 @@ export async function POST(req: NextRequest) {
       .insert({
         parent_service_fee_pct: Number(parentFeePct),
         sitter_commission_pct: Number(sitterCommPct),
+        parent_fee_percentage: Number(parentFeePct),
+        sitter_commission_percentage: Number(sitterCommPct),
         platform_percentage: totalPlatformTake,
         min_platform_fee: Number(minFee || 2),
         max_platform_fee: Number(maxFee || 50),

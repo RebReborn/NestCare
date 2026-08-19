@@ -3,8 +3,9 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { Calendar, Clock, Plus, Trash2, Save, Loader2, CalendarRange, AlertCircle, ShieldCheck } from 'lucide-react';
+import { Calendar, Clock, Plus, Trash2, Save, Loader2, CalendarRange, AlertCircle, ShieldCheck, MapPin } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import LocationAutocompleteInput from '@/components/location/location-autocomplete-input';
 
 const DAYS_OF_WEEK = [
   { value: 0, label: 'Sunday' },
@@ -50,6 +51,52 @@ export default function AvailabilityPage() {
   const [minimumNoticeHours, setMinimumNoticeHours] = useState(0);
   const [savingNotice, setSavingNotice] = useState(false);
 
+  // Location & Travel Privacy State
+  const [city, setCity] = useState('Vancouver');
+  const [province, setProvince] = useState('BC');
+  const [serviceRadiusKm, setServiceRadiusKm] = useState(10);
+  const [travelToParent, setTravelToParent] = useState(true);
+  const [acceptDropoff, setAcceptDropoff] = useState(false);
+  const [serviceLatitude, setServiceLatitude] = useState<number | null>(null);
+  const [serviceLongitude, setServiceLongitude] = useState<number | null>(null);
+  const [savingLocation, setSavingLocation] = useState(false);
+
+  const handleSaveLocationSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!sitterId) return;
+    try {
+      setSavingLocation(true);
+      const updateObj: any = {
+        city,
+        province,
+        service_radius_km: Number(serviceRadiusKm),
+        travel_to_parent: travelToParent,
+        accept_dropoff: acceptDropoff,
+      };
+
+      if (serviceLatitude && serviceLongitude) {
+        updateObj.service_latitude = serviceLatitude;
+        updateObj.service_longitude = serviceLongitude;
+
+        await supabase.from('profiles').update({
+          location_lat: serviceLatitude,
+          location_lng: serviceLongitude,
+        }).eq('id', sitterId);
+      }
+
+      await supabase
+        .from('sitter_profiles')
+        .update(updateObj)
+        .eq('id', sitterId);
+
+      toast.success('Service area & travel privacy settings saved!');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save location settings.');
+    } finally {
+      setSavingLocation(false);
+    }
+  };
+
   useEffect(() => {
     async function loadAvailability() {
       try {
@@ -65,7 +112,7 @@ export default function AvailabilityPage() {
           .from('profiles')
           .select(`
             role,
-            sitter_profiles(minimum_notice_hours)
+            sitter_profiles(minimum_notice_hours, city, province, service_radius_km, travel_to_parent, accept_dropoff)
           `)
           .eq('id', user.id)
           .single();
@@ -76,7 +123,14 @@ export default function AvailabilityPage() {
         }
 
         const sp = Array.isArray(profile?.sitter_profiles) ? profile.sitter_profiles[0] : profile?.sitter_profiles;
-        setMinimumNoticeHours(sp?.minimum_notice_hours || 0);
+        if (sp) {
+          setMinimumNoticeHours(sp.minimum_notice_hours || 0);
+          setCity(sp.city || 'Vancouver');
+          setProvince(sp.province || 'BC');
+          setServiceRadiusKm(sp.service_radius_km || 10);
+          setTravelToParent(sp.travel_to_parent ?? true);
+          setAcceptDropoff(sp.accept_dropoff ?? false);
+        }
 
         setSitterId(user.id);
 
@@ -542,6 +596,103 @@ export default function AvailabilityPage() {
                 <Plus className="h-4.5 w-4.5" /> Add Vacation / Override
               </>
             )}
+          </button>
+        </form>
+      </div>
+
+      {/* SECTION 4: SERVICE AREA & LOCATION PRIVACY SETTINGS */}
+      <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-100 dark:border-slate-800 pb-4">
+          <div>
+            <h2 className="font-display text-lg font-bold text-heading dark:text-white flex items-center gap-2">
+              <MapPin className="h-5 w-5 text-primary" /> Service Area & Travel Distance Privacy
+            </h2>
+            <p className="text-xs text-stone-500 dark:text-slate-400 mt-0.5">
+              Define your travel radius and location preferences. Exact residential addresses are strictly protected until booking is confirmed.
+            </p>
+          </div>
+        </div>
+
+        <form onSubmit={handleSaveLocationSettings} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div>
+              <label className="block text-[10px] font-bold text-stone-400 dark:text-slate-400 uppercase tracking-wider mb-1">
+                Primary Service City
+              </label>
+              <LocationAutocompleteInput
+                value={city}
+                onChange={(val) => setCity(val)}
+                onSelectSuggestion={(sugg) => {
+                  setCity(sugg.city || sugg.address.split(',')[0]);
+                  if (sugg.province) setProvince(sugg.province);
+                  setServiceLatitude(sugg.latitude);
+                  setServiceLongitude(sugg.longitude);
+                }}
+                placeholder="Type city or address..."
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-stone-400 dark:text-slate-400 uppercase tracking-wider mb-1">
+                Province / Region
+              </label>
+              <input
+                type="text"
+                required
+                value={province}
+                onChange={(e) => setProvince(e.target.value)}
+                placeholder="e.g. BC"
+                className="w-full p-3.5 rounded-2xl border border-stone-200 dark:border-slate-700 outline-none text-xs bg-stone-50 dark:bg-slate-800 text-stone-900 dark:text-slate-100 font-medium focus:border-primary transition-colors"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-stone-400 dark:text-slate-400 uppercase tracking-wider mb-1">
+                Max Travel Radius ({serviceRadiusKm} km)
+              </label>
+              <input
+                type="range"
+                min="5"
+                max="50"
+                step="5"
+                value={serviceRadiusKm}
+                onChange={(e) => setServiceRadiusKm(Number(e.target.value))}
+                className="w-full h-2 bg-stone-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-primary mt-3"
+              />
+            </div>
+          </div>
+
+          <div className="p-4 bg-stone-50 dark:bg-slate-800/80 rounded-2xl border border-stone-200 dark:border-slate-700 space-y-3 text-xs">
+            <span className="font-bold text-heading dark:text-white block text-xs">Travel & Care Delivery Options</span>
+
+            <label className="flex items-center gap-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={travelToParent}
+                onChange={(e) => setTravelToParent(e.target.checked)}
+                className="w-4 h-4 text-primary rounded border-stone-300 focus:ring-primary accent-primary"
+              />
+              <span className="text-stone-700 dark:text-slate-200 font-medium">🚗 Will travel to parent's home for childcare</span>
+            </label>
+
+            <label className="flex items-center gap-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={acceptDropoff}
+                onChange={(e) => setAcceptDropoff(e.target.checked)}
+                className="w-4 h-4 text-primary rounded border-stone-300 focus:ring-primary accent-primary"
+              />
+              <span className="text-stone-700 dark:text-slate-200 font-medium">🏠 Accept parent drop-off at sitter's home</span>
+            </label>
+          </div>
+
+          <button
+            type="submit"
+            disabled={savingLocation}
+            className="w-full py-3.5 bg-primary text-white text-xs font-bold rounded-2xl hover:bg-emerald-800 active-press transition-colors shadow-md flex items-center justify-center gap-2"
+          >
+            {savingLocation ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Save Service Area & Travel Privacy Settings
           </button>
         </form>
       </div>

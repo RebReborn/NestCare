@@ -1,10 +1,20 @@
 export const dynamic = 'force-dynamic';
 
+import type { Metadata } from 'next';
 import { BottomNav } from '@/components/navigation/bottom-nav';
 import { SidebarNav } from '@/components/navigation/sidebar-nav';
 import { HeaderBar } from '@/components/navigation/header-bar';
 import { OnboardingBanner } from '@/components/onboarding/onboarding-banner';
 import { GlobalCallListener } from '@/components/video-call/global-call-listener';
+
+// All dashboard pages are private — block all crawlers
+export const metadata: Metadata = {
+  robots: {
+    index: false,
+    follow: false,
+    googleBot: { index: false, follow: false },
+  },
+};
 
 export default function DashboardLayout({
   children,

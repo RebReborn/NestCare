@@ -7,9 +7,12 @@ import {
   ShieldCheck, Search, Users, Car, AlertTriangle, FileText,
   CheckCircle2, ChevronRight, ChevronLeft, Plus, Trash2,
   Loader2, Star, Clock, Heart, Upload, Info,
-  Smile, Palette, GraduationCap, UserCheck, School, Bus, Moon, Sparkles, BookOpen, Utensils, HeartHandshake, Footprints, PartyPopper, Stethoscope, Timer, Save, Lock, BadgeCheck
+  Smile, Palette, GraduationCap, UserCheck, School, Bus, Moon, Sparkles, BookOpen, Utensils, HeartHandshake, Footprints, PartyPopper, Stethoscope, Timer, Save, Lock, BadgeCheck, MapPin
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
+import LocationAutocompleteInput from '@/components/location/location-autocomplete-input';
+import { geocodeLocation } from '@/lib/location/geocoder';
 
 // ─── Constants ───────────────────────────────────────────────
 const PLATFORM_FEE = 0.10;
@@ -18,7 +21,7 @@ const POLICY_VERSION = '1.0';
 
 const STEP_CONFIG = [
   { n: 1,  icon: Baby,         title: 'Welcome',               subtitle: 'Get started with NestCare' },
-  { n: 2,  icon: User,         title: 'Basic Identity',         subtitle: 'Tell us about yourself' },
+  { n: 2,  icon: User,         title: 'Basic Identity & Location', subtitle: 'Tell us about yourself & your service area' },
   { n: 3,  icon: Briefcase,    title: 'Childcare Experience',   subtitle: 'Your background & qualifications' },
   { n: 4,  icon: LayoutGrid,   title: 'Services',               subtitle: 'What you offer families' },
   { n: 5,  icon: Calendar,     title: 'Availability',           subtitle: 'Your weekly schedule' },
@@ -80,6 +83,9 @@ interface WizardData {
   // Step 2
   firstName: string; lastName: string; displayName: string;
   phone: string; serviceArea: string; avatarUrl: string;
+  city: string; province: string;
+  serviceLatitude: number | null; serviceLongitude: number | null;
+  serviceRadiusKm: number; travelToParent: boolean; acceptDropoff: boolean;
   // Step 3
   yearsExperience: number; childcareTypes: string[]; ageGroups: string[];
   maxChildren: number; languages: string[]; certs: string[];
@@ -101,6 +107,8 @@ interface WizardData {
 
 const defaultData: WizardData = {
   firstName: '', lastName: '', displayName: '', phone: '', serviceArea: '', avatarUrl: '',
+  city: 'Vancouver', province: 'BC', serviceLatitude: null, serviceLongitude: null,
+  serviceRadiusKm: 15, travelToParent: true, acceptDropoff: false,
   yearsExperience: 0, childcareTypes: [], ageGroups: [], maxChildren: 3,
   languages: [], certs: [], employmentHistory: '',
   services: [],
@@ -149,7 +157,14 @@ export default function SitterOnboardingPage() {
           displayName: prof?.display_name || '',
           phone: prof?.phone || '',
           avatarUrl: prof?.avatar_url || '',
-          serviceArea: sp?.service_area || '',
+          city: sp?.city || 'Vancouver',
+          province: sp?.province || 'BC',
+          serviceArea: sp?.service_area || sp?.city || '',
+          serviceLatitude: sp?.service_latitude || prof?.location_lat || null,
+          serviceLongitude: sp?.service_longitude || prof?.location_lng || null,
+          serviceRadiusKm: sp?.service_radius_km || 15,
+          travelToParent: sp?.travel_to_parent ?? true,
+          acceptDropoff: sp?.accept_dropoff ?? false,
           yearsExperience: sp?.years_experience || 0,
           childcareTypes: sp?.childcare_types || [],
           ageGroups: sp?.age_groups || [],
@@ -197,7 +212,7 @@ export default function SitterOnboardingPage() {
     try {
       const sid = userId;
 
-      // Always update core profile info (works on all DB schema versions)
+      // Update core profile info
       await supabase.from('profiles').update({
         first_name: data.firstName,
         last_name: data.lastName,
@@ -208,12 +223,41 @@ export default function SitterOnboardingPage() {
 
       if (step === 2) {
         try {
-          await supabase.from('sitter_profiles').update({
-            service_area: data.serviceArea,
+          const parts = (data.serviceArea || '').split(',').map((s: string) => s.trim());
+          const cityVal = data.city || parts[0] || data.serviceArea || 'Vancouver';
+          const provVal = data.province || parts[1] || 'BC';
+
+          const updateObj: any = {
+            city: cityVal,
+            province: provVal,
+            service_radius_km: data.serviceRadiusKm || 15,
+            travel_to_parent: data.travelToParent ?? true,
+            accept_dropoff: data.acceptDropoff ?? false,
             onboarding_step: targetStep
-          }).eq('id', sid);
+          };
+
+          if (data.serviceLatitude && data.serviceLongitude) {
+            updateObj.service_latitude = data.serviceLatitude;
+            updateObj.service_longitude = data.serviceLongitude;
+
+            await supabase.from('profiles').update({
+              location_lat: data.serviceLatitude,
+              location_lng: data.serviceLongitude,
+            }).eq('id', sid);
+          }
+
+          const { error: spErr } = await supabase.from('sitter_profiles').update(updateObj).eq('id', sid);
+          if (spErr) console.warn('[Onboarding Step 2 Error]:', spErr);
+
+          if (data.serviceArea) {
+            try {
+              await supabase.from('sitter_profiles').update({ service_area: data.serviceArea }).eq('id', sid);
+            } catch (e) {
+              // Ignore missing service_area column error in schema cache
+            }
+          }
         } catch (e) {
-          console.warn('[Onboarding] Optional column update skipped:', e);
+          console.warn('[Onboarding] Step 2 update error:', e);
         }
       }
 
@@ -313,7 +357,7 @@ export default function SitterOnboardingPage() {
         try {
           await supabase.from('sitter_profiles').update({
             has_drivers_license: data.hasDriversLicense, vehicle_info: data.vehicleInfo,
-            transportation_insurance: data.transportationInsurance, onboarding_step: targetStep,
+            transportationInsurance: data.transportationInsurance, onboarding_step: targetStep,
           }).eq('id', sid);
         } catch (e) {}
       }
@@ -338,23 +382,28 @@ export default function SitterOnboardingPage() {
           }, { onConflict: 'user_id,agreement_type,policy_version' });
         } catch (e) {}
 
-        // Always update identity_verified / phone_verified in standard sitter_profiles table
         await supabase.from('sitter_profiles').update({
           identity_verified: true,
           phone_verified: true,
           hourly_rate: data.hourlyRate,
           minimum_booking_hours: data.minBookingHours,
           years_experience: data.yearsExperience,
+          onboarding_step: 13,
+          onboarding_completed: true,
         }).eq('id', sid);
-
-        try {
-          await supabase.from('sitter_profiles').update({
-            onboarding_step: 13, onboarding_completed: true,
-          }).eq('id', sid);
-        } catch (e) {}
       }
-    } catch (e) { console.error('Save error:', e); }
-    finally { setSaving(false); }
+    } catch (e) {
+      console.error('Save error:', e);
+      toast.error('Error saving profile changes. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveAndExit = async () => {
+    await saveStep(step);
+    toast.success('Your profile changes have been saved!');
+    router.push('/dashboard');
   };
 
   const next = async () => {
@@ -440,6 +489,22 @@ export default function SitterOnboardingPage() {
 
   return (
     <div className="max-w-lg mx-auto px-4 pt-4 pb-12 space-y-5">
+      {/* Header & Save & Exit Bar */}
+      <div className="flex items-center justify-between bg-white p-3 rounded-2xl border border-stone-200 shadow-2xs">
+        <div className="flex items-center gap-2 text-xs font-bold text-stone-500">
+          <span className="text-stone-900 font-extrabold">NestCare Sitter Setup</span>
+        </div>
+        <button
+          type="button"
+          onClick={handleSaveAndExit}
+          disabled={saving}
+          className="px-3.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-primary dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 active-press"
+        >
+          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5 text-emerald-600" />}
+          <span>Save & Exit</span>
+        </button>
+      </div>
+
       {/* Progress */}
       <div className="space-y-3">
         <div className="flex items-center justify-between text-[11px] font-bold text-stone-400">
@@ -479,22 +544,31 @@ export default function SitterOnboardingPage() {
         {step === 12 && <Step12Agreement data={data} setField={setField} />}
       </div>
 
-      {/* Navigation */}
-      <div className="flex gap-3 pt-2">
+      {/* Navigation Bar with Save & Exit */}
+      <div className="flex gap-2.5 pt-2">
         {step > 1 && (
           <button
             onClick={back}
-            className="flex-1 py-3.5 border border-stone-200 text-stone-600 rounded-2xl text-xs font-bold hover:bg-stone-50 active-press transition-colors flex items-center justify-center gap-1.5"
+            className="py-3.5 px-4 border border-stone-200 text-stone-600 rounded-2xl text-xs font-bold hover:bg-stone-50 active-press transition-colors flex items-center justify-center gap-1"
           >
             <ChevronLeft className="h-4 w-4" /> Back
           </button>
         )}
+
+        <button
+          onClick={handleSaveAndExit}
+          disabled={saving}
+          className="py-3.5 px-4 border border-emerald-200 bg-emerald-50 text-emerald-800 rounded-2xl text-xs font-bold hover:bg-emerald-100 active-press transition-colors flex items-center justify-center gap-1.5"
+        >
+          <Save className="h-4 w-4 text-emerald-600" /> Save & Exit
+        </button>
+
         <button
           onClick={step === 1 ? () => { setStep(2); window.scrollTo({ top: 0 }); } : next}
           disabled={saving ||
             (step === 11 && (!data.safetyAgreed || !safetyScrolled)) ||
             (step === 12 && !data.providerAgreed)}
-          className="flex-2 flex-1 py-3.5 bg-primary text-white rounded-2xl text-xs font-bold hover:bg-emerald-800 active-press disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5"
+          className="flex-1 py-3.5 bg-primary text-white rounded-2xl text-xs font-bold hover:bg-emerald-800 active-press disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5"
         >
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : (
             <>
@@ -515,64 +589,185 @@ export default function SitterOnboardingPage() {
   );
 }
 
-// ─── Step 1: Welcome ─────────────────────────────────────────
-function Step1Welcome() {
+// ─── Step Components ─────────────────────────────────────────
+
+function Card({ title, icon, children }: any) {
   return (
-    <div className="bg-gradient-to-br from-primary/90 to-emerald-700 rounded-3xl p-8 text-white space-y-5">
-      <div className="p-4 bg-white/15 rounded-2xl w-fit">
-        <Sparkles className="h-8 w-8 text-white" />
-      </div>
-      <div>
-        <h2 className="font-display text-2xl font-black mb-2">Welcome to NestCare!</h2>
-        <p className="text-sm text-emerald-100 leading-relaxed">
-          We're excited to have you join our community of trusted caregivers.
-          Let's set up your profile so families can find and book you.
-        </p>
-      </div>
-      <div className="space-y-3 pt-2">
-        {[
-          { icon: Timer, text: 'Takes about 10–15 minutes' },
-          { icon: Save, text: 'Your progress is automatically saved' },
-          { icon: Lock, text: 'Your information is kept private and secure' },
-          { icon: CheckCircle2, text: 'You can skip optional steps and return later' },
-        ].map(item => {
-          const Icon = item.icon;
-          return (
-            <div key={item.text} className="flex items-center gap-3 text-sm text-emerald-100">
-              <Icon className="h-4 w-4 shrink-0 text-white" />
-              <span>{item.text}</span>
-            </div>
-          );
-        })}
-      </div>
+    <div className="bg-white border border-stone-200 rounded-3xl p-5 space-y-3.5 shadow-2xs">
+      <h2 className="font-display font-black text-sm text-heading flex items-center gap-2 border-b border-stone-100 pb-2.5">
+        {icon} {title}
+      </h2>
+      {children}
     </div>
   );
 }
 
-// ─── Step 2: Identity ─────────────────────────────────────────
+function Field({ label, value, onChange, placeholder, type = 'text' }: any) {
+  return (
+    <div className="space-y-1">
+      <label className="block text-[11px] font-bold text-stone-600 uppercase tracking-wider">{label}</label>
+      <input
+        type={type}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full p-3.5 rounded-2xl border border-stone-200 outline-none text-xs bg-stone-50 font-medium focus:border-primary transition-colors"
+      />
+    </div>
+  );
+}
+
+function Step1Welcome() {
+  return (
+    <div className="space-y-4">
+      <div className="bg-gradient-to-br from-emerald-900 to-emerald-950 text-white rounded-3xl p-6 space-y-3 relative overflow-hidden">
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/10 rounded-full text-[11px] font-bold text-emerald-200">
+          <Sparkles className="h-3.5 w-3.5 text-amber-300" /> Professional Sitter Portal
+        </div>
+        <h2 className="font-display text-2xl font-black leading-snug">
+          Welcome to the NestCare Caregiver Network
+        </h2>
+        <p className="text-xs text-emerald-100 leading-relaxed font-medium">
+          Set up your profile, establish your rate, add your service area location, and connect with trusted families seeking verified childcare.
+        </p>
+      </div>
+
+      <Card title="What You'll Need to Complete Setup" icon={<CheckCircle2 className="h-4 w-4 text-primary" />}>
+        <div className="space-y-3 text-xs font-medium text-stone-600">
+          {[
+            { icon: User, label: 'Basic Info & Location', desc: 'Your display name, phone, and service area address' },
+            { icon: Briefcase, label: 'Childcare Background', desc: 'Years of experience, age groups, and specialties' },
+            { icon: Calendar, label: 'Availability & Rates', desc: 'Your recurring shift schedule and base hourly pricing' },
+            { icon: ShieldCheck, label: 'Safety Commitment', desc: 'Reviewing child protection terms and provider agreement' },
+          ].map((item, i) => {
+            const Icon = item.icon;
+            return (
+              <div key={i} className="flex items-start gap-3 p-3 rounded-2xl bg-stone-50 border border-stone-100">
+                <div className="p-2 bg-white rounded-xl shadow-2xs text-primary shrink-0">
+                  <Icon className="h-4 w-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-stone-900">{item.label}</h3>
+                  <p className="text-[11px] text-stone-500 mt-0.5">{item.desc}</p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ─── Step 2: Identity & Location ──────────────────────────────
 function Step2Identity({ data, setField, toggle }: any) {
   return (
     <div className="space-y-4">
       <Card title="Legal Name" icon={<User className="h-4 w-4 text-primary" />}>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Legal First Name" value={data.firstName} onChange={v => setField('firstName', v)} placeholder="Jane" />
-          <Field label="Legal Last Name" value={data.lastName} onChange={v => setField('lastName', v)} placeholder="Smith" />
+          <Field label="Legal First Name" value={data.firstName} onChange={(v: string) => setField('firstName', v)} placeholder="Jane" />
+          <Field label="Legal Last Name" value={data.lastName} onChange={(v: string) => setField('lastName', v)} placeholder="Smith" />
         </div>
-        <Field label="Preferred Display Name" value={data.displayName} onChange={v => setField('displayName', v)} placeholder="Jane S." />
+        <Field label="Preferred Display Name" value={data.displayName} onChange={(v: string) => setField('displayName', v)} placeholder="Jane S." />
         <p className="text-[10px] text-stone-400">This is what families see. Your full legal name is kept private.</p>
       </Card>
 
-      <Card title="Contact & Location">
-        <Field label="Phone Number" value={data.phone} onChange={v => setField('phone', v)} placeholder="+1 (780) 555-0123" type="tel" />
-        <Field label="Service Area" value={data.serviceArea} onChange={v => setField('serviceArea', v)} placeholder="e.g. Edmonton, AB — Northwest & Central" />
+      <Card title="Contact & Location Settings" icon={<MapPin className="h-4 w-4 text-primary" />}>
+        <Field label="Phone Number" value={data.phone} onChange={(v: string) => setField('phone', v)} placeholder="+1 (780) 555-0123" type="tel" />
+        
+        <div className="space-y-1.5">
+          <label className="block text-[11px] font-bold text-stone-600 uppercase tracking-wider">
+            Primary Service City & Address
+          </label>
+          <LocationAutocompleteInput
+            value={data.serviceArea}
+            onChange={(val) => setField('serviceArea', val)}
+            onSelectSuggestion={(sugg) => {
+              setField('serviceArea', sugg.address);
+              setField('city', sugg.city || sugg.address.split(',')[0]);
+              setField('province', sugg.province || '');
+              setField('serviceLatitude', sugg.latitude);
+              setField('serviceLongitude', sugg.longitude);
+            }}
+            onLocationCommit={(locName) => {
+              geocodeLocation(locName).then(results => {
+                if (results.length > 0) {
+                  setField('serviceLatitude', results[0].latitude);
+                  setField('serviceLongitude', results[0].longitude);
+                  setField('city', results[0].city || results[0].displayName.split(',')[0]);
+                }
+              });
+            }}
+            placeholder="Type city or address to search..."
+          />
+        </div>
+
+        {/* Saved Coordinates Badge */}
+        {data.serviceLatitude && data.serviceLongitude && (
+          <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-bold text-emerald-900 flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <MapPin className="h-4 w-4 text-emerald-600 shrink-0" />
+              📍 Service Center: {data.city || data.serviceArea} ({data.serviceLatitude.toFixed(4)}, {data.serviceLongitude.toFixed(4)})
+            </span>
+            <span className="text-[10px] text-emerald-600 bg-white px-2 py-0.5 rounded-md border border-emerald-200 font-mono">
+              Coordinates Saved
+            </span>
+          </div>
+        )}
+
+        {/* Service Radius */}
+        <div className="space-y-1.5 pt-2">
+          <label className="block text-[11px] font-bold text-stone-600 uppercase tracking-wider">
+            Max Travel Radius ({data.serviceRadiusKm || 15} km)
+          </label>
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+            {[5, 10, 15, 25, 50].map((radius) => (
+              <button
+                key={radius}
+                type="button"
+                onClick={() => setField('serviceRadiusKm', radius)}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all ${
+                  (data.serviceRadiusKm || 15) === radius
+                    ? 'bg-primary text-white shadow-2xs'
+                    : 'bg-stone-50 border border-stone-200 text-stone-600 hover:bg-stone-100'
+                }`}
+              >
+                {radius} km
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Travel Options */}
+        <div className="space-y-2 pt-2 border-t border-stone-100">
+          <label className="flex items-center gap-2.5 p-2 rounded-xl hover:bg-stone-50 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={data.travelToParent ?? true}
+              onChange={(e) => setField('travelToParent', e.target.checked)}
+              className="w-4 h-4 rounded text-primary accent-primary"
+            />
+            <span className="text-xs font-semibold text-stone-700">🚗 Will travel to parent's home to provide care</span>
+          </label>
+          <label className="flex items-center gap-2.5 p-2 rounded-xl hover:bg-stone-50 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={data.acceptDropoff ?? false}
+              onChange={(e) => setField('acceptDropoff', e.target.checked)}
+              className="w-4 h-4 rounded text-primary accent-primary"
+            />
+            <span className="text-xs font-semibold text-stone-700">🏠 Accept parent drop-off at my home</span>
+          </label>
+        </div>
+
         <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 flex gap-2">
           <Info className="h-3.5 w-3.5 text-amber-600 shrink-0 mt-0.5" />
-          <p className="text-[11px] text-amber-800">Your exact residential address is never shared publicly.</p>
+          <p className="text-[11px] text-amber-800">Your exact residential address is never shared publicly. Only calculated distance and neighborhood city are visible pre-booking.</p>
         </div>
       </Card>
 
       <Card title="Profile Photo">
-        <Field label="Profile Photo URL" value={data.avatarUrl} onChange={v => setField('avatarUrl', v)} placeholder="https://..." />
+        <Field label="Profile Photo URL" value={data.avatarUrl} onChange={(v: string) => setField('avatarUrl', v)} placeholder="https://..." />
         {data.avatarUrl && (
           <img src={data.avatarUrl} alt="Preview" className="w-20 h-20 rounded-2xl object-cover border border-stone-200 mt-1" onError={e => (e.currentTarget.style.display = 'none')} />
         )}
@@ -635,13 +830,13 @@ function Step3Experience({ data, setField, toggle }: any) {
       </Card>
 
       <Card title="Languages Spoken">
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-1.5">
           {LANGUAGES.map(l => {
             const active = data.languages.includes(l);
             return (
               <button key={l} type="button"
                 onClick={() => setField('languages', toggle(data.languages, l))}
-                className={`px-3 py-1.5 rounded-xl border text-[11px] font-bold transition-all active-press ${active ? 'bg-primary text-white border-primary' : 'bg-stone-50 border-stone-200 text-stone-600 hover:bg-stone-100'}`}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all active-press ${active ? 'bg-primary text-white border-primary' : 'bg-stone-50 border-stone-200 text-stone-600 hover:bg-stone-100'}`}
               >
                 {l}
               </button>
@@ -655,7 +850,7 @@ function Step3Experience({ data, setField, toggle }: any) {
           {CERT_OPTIONS.map(c => {
             const active = data.certs.includes(c.key);
             return (
-              <label key={c.key} className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${active ? 'bg-emerald-50 border-emerald-200' : 'bg-stone-50 border-stone-150 hover:bg-stone-100'}`}>
+              <label key={c.key} className="flex items-center gap-2.5 p-2.5 rounded-xl hover:bg-stone-50 cursor-pointer">
                 <input type="checkbox" checked={active}
                   onChange={() => setField('certs', toggle(data.certs, c.key))}
                   className="rounded accent-primary" />
@@ -665,13 +860,6 @@ function Step3Experience({ data, setField, toggle }: any) {
           })}
         </div>
       </Card>
-
-      <Card title="Previous Employment (Optional)">
-        <textarea rows={3} value={data.employmentHistory}
-          onChange={e => setField('employmentHistory', e.target.value)}
-          placeholder="e.g. Nanny for the Johnson family (2022–2024), Daycare assistant at Sunny Kids (2020–2022)..."
-          className="w-full p-3.5 rounded-2xl border border-stone-200 text-xs bg-stone-50 outline-none focus:border-primary resize-none" />
-      </Card>
     </div>
   );
 }
@@ -679,514 +867,263 @@ function Step3Experience({ data, setField, toggle }: any) {
 // ─── Step 4: Services ─────────────────────────────────────────
 function Step4Services({ data, toggle, setField }: any) {
   return (
-    <Card title="Select all services you offer">
-      <div className="grid grid-cols-2 gap-2.5">
-        {SERVICES.map(s => {
-          const active = data.services.includes(s.id);
-          const Icon = s.icon;
-          return (
-            <button key={s.id} type="button"
-              onClick={() => setField('services', toggle(data.services, s.id))}
-              className={`p-3.5 rounded-2xl border text-left transition-all active-press ${active ? 'bg-emerald-50 border-emerald-200' : 'bg-stone-50 border-stone-200 hover:bg-stone-100'}`}
-            >
-              <Icon className={`h-6 w-6 mb-2 ${active ? 'text-primary' : 'text-stone-400'}`} />
-              <span className={`text-[11px] font-bold block leading-tight ${active ? 'text-emerald-800' : 'text-stone-700'}`}>{s.label}</span>
-            </button>
-          );
-        })}
-      </div>
-      <p className="text-[10px] text-stone-400 mt-1">You can update these anytime from your profile settings.</p>
-    </Card>
+    <div className="space-y-4">
+      <Card title="Services Offered">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          {SERVICES.map(s => {
+            const active = data.services.includes(s.label);
+            const Icon = s.icon;
+            return (
+              <button key={s.id} type="button"
+                onClick={() => setField('services', toggle(data.services, s.label))}
+                className={`p-3.5 rounded-2xl border text-left flex items-center gap-3 transition-all active-press ${active ? 'bg-emerald-50 border-emerald-200 text-emerald-900 shadow-2xs' : 'bg-stone-50 border-stone-200 text-stone-600 hover:bg-stone-100'}`}
+              >
+                <div className={`p-2 rounded-xl ${active ? 'bg-primary text-white' : 'bg-white text-stone-400'}`}>
+                  <Icon className="h-4 w-4" />
+                </div>
+                <span className="text-xs font-bold">{s.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </Card>
+    </div>
   );
 }
 
-// ─── Step 5: Availability ─────────────────────────────────────
+// ─── Step 5: Availability ──────────────────────────────────────
 function Step5Availability({ data, setField }: any) {
-  const rulesMap = Object.fromEntries(data.availabilityRules.map((r: AvailRule) => [r.day, r]));
-
-  const setDay = (day: number, startTime: string, endTime: string) => {
-    const filtered = data.availabilityRules.filter((r: AvailRule) => r.day !== day);
-    setField('availabilityRules', [...filtered, { day, startTime, endTime }]);
+  const addRule = (day: number) => {
+    const newRules = [...data.availabilityRules, { day, startTime: '09:00', endTime: '17:00' }];
+    setField('availabilityRules', newRules);
   };
-  const removeDay = (day: number) => setField('availabilityRules', data.availabilityRules.filter((r: AvailRule) => r.day !== day));
+
+  const removeRule = (idx: number) => {
+    const newRules = data.availabilityRules.filter((_: any, i: number) => i !== idx);
+    setField('availabilityRules', newRules);
+  };
 
   return (
     <div className="space-y-4">
-      <Card title="Weekly Schedule" icon={<Calendar className="h-4 w-4 text-primary" />}>
-        <p className="text-[11px] text-stone-400 mb-3">Toggle the days you're available and set your hours.</p>
-        <div className="space-y-2">
-          {DAYS.map((day, i) => {
-            const rule = rulesMap[i];
-            const active = !!rule;
+      <Card title="Recurring Weekly Shifts">
+        <p className="text-xs text-stone-500 font-medium">Add days and hours when you are generally available to take bookings.</p>
+        <div className="space-y-3">
+          {DAYS.map((dayName, dayIdx) => {
+            const dayRules = data.availabilityRules.filter((r: any) => r.day === dayIdx);
             return (
-              <div key={day} className={`p-3 rounded-2xl border transition-all ${active ? 'bg-emerald-50/50 border-emerald-200' : 'bg-stone-50 border-stone-150'}`}>
-                <div className="flex items-center justify-between gap-2">
-                  <label className="flex items-center gap-2.5 cursor-pointer">
-                    <input type="checkbox" checked={active}
-                      onChange={e => {
-                        if (e.target.checked) setDay(i, '09:00', '17:00');
-                        else removeDay(i);
-                      }}
-                      className="rounded accent-primary" />
-                    <span className={`text-xs font-bold ${active ? 'text-emerald-800' : 'text-stone-500'}`}>{day}</span>
-                  </label>
-                  {active && (
-                    <div className="flex items-center gap-1.5 text-[11px]">
-                      <input type="time" value={rule.startTime}
-                        onChange={e => setDay(i, e.target.value, rule.endTime)}
-                        className="px-2 py-1 rounded-lg border border-stone-200 text-xs bg-white outline-none focus:border-primary" />
-                      <span className="text-stone-400">–</span>
-                      <input type="time" value={rule.endTime}
-                        onChange={e => setDay(i, rule.startTime, e.target.value)}
-                        className="px-2 py-1 rounded-lg border border-stone-200 text-xs bg-white outline-none focus:border-primary" />
-                    </div>
-                  )}
-                  {!active && <span className="text-[10px] text-stone-400 font-semibold">Unavailable</span>}
+              <div key={dayName} className="p-3 bg-stone-50 border border-stone-100 rounded-2xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-stone-800">{dayName}</span>
+                  <button type="button" onClick={() => addRule(dayIdx)}
+                    className="text-[11px] font-bold text-primary hover:underline flex items-center gap-1">
+                    <Plus className="h-3 w-3" /> Add shift
+                  </button>
                 </div>
+                {dayRules.length === 0 ? (
+                  <span className="text-[10px] text-stone-400 italic">Not available</span>
+                ) : (
+                  <div className="space-y-1.5">
+                    {dayRules.map((rule: any, rIdx: number) => {
+                      const globalIdx = data.availabilityRules.indexOf(rule);
+                      return (
+                        <div key={rIdx} className="flex items-center gap-2 text-xs">
+                          <input type="time" value={rule.startTime}
+                            onChange={e => {
+                              const updated = [...data.availabilityRules];
+                              updated[globalIdx].startTime = e.target.value;
+                              setField('availabilityRules', updated);
+                            }}
+                            className="p-1.5 rounded-xl border border-stone-200 bg-white font-mono text-[11px]" />
+                          <span className="text-stone-400">to</span>
+                          <input type="time" value={rule.endTime}
+                            onChange={e => {
+                              const updated = [...data.availabilityRules];
+                              updated[globalIdx].endTime = e.target.value;
+                              setField('availabilityRules', updated);
+                            }}
+                            className="p-1.5 rounded-xl border border-stone-200 bg-white font-mono text-[11px]" />
+                          <button type="button" onClick={() => removeRule(globalIdx)} className="p-1 text-stone-400 hover:text-red-500">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
       </Card>
-      <div className="bg-blue-50 border border-blue-100 rounded-2xl p-3.5 flex gap-2.5">
-        <Info className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
-        <p className="text-[11px] text-blue-800 leading-relaxed">You can manage vacation days and one-time blocked dates from your <strong>Availability</strong> settings page after completing onboarding.</p>
-      </div>
     </div>
   );
 }
 
-// ─── Step 6: Pricing ──────────────────────────────────────────
+// ─── Step 6: Pricing ───────────────────────────────────────────
 function Step6Pricing({ data, setField }: any) {
-  const PLATFORM_FEE = 0.10;
-  const payout = (data.hourlyRate * (1 - PLATFORM_FEE)).toFixed(2);
-
-  // Live Pricing Preview Math
-  const getPreviewRate = (numKids: number) => {
-    if (data.pricingModel === 'flat') {
-      return data.hourlyRate;
-    }
-    if (data.pricingModel === 'additional_child') {
-      return data.hourlyRate + Math.max(0, numKids - 1) * (data.additionalChildRate || 0);
-    }
-    if (data.pricingModel === 'per_child') {
-      return data.hourlyRate * numKids;
-    }
-    return data.hourlyRate;
-  };
-
   return (
     <div className="space-y-4">
-      {/* 1. Base Rate Card */}
-      <Card title="Base Hourly Rate" icon={<DollarSign className="h-4 w-4 text-primary" />}>
-        <div className="text-center py-2">
-          <span className="font-display text-4xl font-black text-heading">${data.hourlyRate}</span>
-          <span className="text-stone-400 text-sm font-bold">/hr</span>
+      <Card title="Base Hourly Rate">
+        <div>
+          <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Base Rate ($ / hour)</label>
+          <div className="relative">
+            <DollarSign className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-stone-400" />
+            <input type="number" min={15} max={100} value={data.hourlyRate}
+              onChange={e => setField('hourlyRate', Number(e.target.value))}
+              className="w-full pl-10 p-3.5 rounded-2xl border border-stone-200 text-sm font-bold text-heading bg-stone-50 outline-none focus:border-primary" />
+          </div>
         </div>
-        <input type="range" min={15} max={75} step={1} value={data.hourlyRate}
-          onChange={e => setField('hourlyRate', Number(e.target.value))}
-          className="w-full accent-primary" />
-        <div className="flex justify-between text-[10px] text-stone-400 font-bold">
-          <span>$15/hr</span><span>$75/hr</span>
-        </div>
-        <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-3.5 mt-2">
-          <p className="text-[10px] text-emerald-700 font-bold uppercase tracking-wide mb-1">Your estimated base payout</p>
-          <p className="font-display text-xl font-black text-emerald-800">${payout}<span className="text-sm font-bold">/hr</span></p>
-          <p className="text-[10px] text-emerald-600 mt-0.5">After NestCare's 10% platform fee</p>
-        </div>
-      </Card>
 
-      {/* 2. Sitter Booking Preferences */}
-      <Card title="Booking Preferences">
-        <div className="space-y-3.5">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Min. Booking Duration</label>
-              <select value={data.minBookingHours} onChange={e => setField('minBookingHours', Number(e.target.value))}
-                className="w-full p-3.5 rounded-2xl border border-stone-200 text-xs bg-stone-50 outline-none focus:border-primary appearance-none font-bold">
-                {[1, 2, 3, 4, 5].map(h => <option key={h} value={h}>{h} hour{h > 1 ? 's' : ''}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Max Children Capacity</label>
-              <input type="number" min={1} max={10} value={data.maxChildren}
-                onChange={e => setField('maxChildren', Number(e.target.value))}
-                className="w-full p-3.5 rounded-2xl border border-stone-200 text-xs bg-stone-50 outline-none focus:border-primary font-bold" />
-            </div>
+        <div className="grid grid-cols-2 gap-3 pt-2">
+          <div>
+            <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Min Booking Hours</label>
+            <input type="number" min={1} max={12} value={data.minBookingHours}
+              onChange={e => setField('minBookingHours', Number(e.target.value))}
+              className="w-full p-3.5 rounded-2xl border border-stone-200 text-xs bg-stone-50 font-bold outline-none focus:border-primary" />
           </div>
           <div>
-            <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Minimum Booking Notice Required</label>
-            <select value={data.minimumNoticeHours} onChange={e => setField('minimumNoticeHours', Number(e.target.value))}
-              className="w-full p-3.5 rounded-2xl border border-stone-200 text-xs bg-stone-50 outline-none focus:border-primary appearance-none font-bold">
-              <option value={0}>Same day (no notice required)</option>
-              <option value={2}>2 hours notice</option>
-              <option value={6}>6 hours notice</option>
-              <option value={12}>12 hours notice</option>
-              <option value={24}>24 hours (1 day) notice</option>
-              <option value={48}>48 hours (2 days) notice</option>
-            </select>
+            <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Advance Notice (hrs)</label>
+            <input type="number" min={0} max={72} value={data.minimumNoticeHours}
+              onChange={e => setField('minimumNoticeHours', Number(e.target.value))}
+              className="w-full p-3.5 rounded-2xl border border-stone-200 text-xs bg-stone-50 font-bold outline-none focus:border-primary" />
           </div>
-        </div>
-      </Card>
-
-      {/* 3. Pricing Model Selection */}
-      <Card title="Multiple Children Pricing">
-        <label className="block text-[10px] font-bold text-stone-400 uppercase mb-2">How do you charge for multiple children?</label>
-        
-        <div className="space-y-2">
-          {/* Option A: Flat Rate */}
-          <button
-            type="button"
-            onClick={() => setField('pricingModel', 'flat')}
-            className={`w-full p-4 border rounded-2xl text-left transition-all active-press flex items-start gap-3 w-full ${
-              data.pricingModel === 'flat' ? 'border-primary bg-emerald-50/45' : 'border-stone-200 hover:bg-stone-50'
-            }`}
-          >
-            <div className={`mt-0.5 h-4 w-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
-              data.pricingModel === 'flat' ? 'border-primary text-primary' : 'border-stone-300'
-            }`}>
-              {data.pricingModel === 'flat' && <div className="h-2 w-2 rounded-full bg-primary" />}
-            </div>
-            <div>
-              <strong className="block text-xs text-heading">Flat hourly rate</strong>
-              <span className="text-[10px] text-stone-500">${data.hourlyRate}/hour regardless of number of children.</span>
-            </div>
-          </button>
-
-          {/* Option B: Additional Child */}
-          <button
-            type="button"
-            onClick={() => setField('pricingModel', 'additional_child')}
-            className={`w-full p-4 border rounded-2xl text-left transition-all active-press flex items-start gap-3 w-full ${
-              data.pricingModel === 'additional_child' ? 'border-primary bg-emerald-50/45' : 'border-stone-200 hover:bg-stone-50'
-            }`}
-          >
-            <div className={`mt-0.5 h-4 w-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
-              data.pricingModel === 'additional_child' ? 'border-primary text-primary' : 'border-stone-300'
-            }`}>
-              {data.pricingModel === 'additional_child' && <div className="h-2 w-2 rounded-full bg-primary" />}
-            </div>
-            <div className="flex-1">
-              <strong className="block text-xs text-heading">Additional-child pricing</strong>
-              <span className="text-[10px] text-stone-500">
-                ${data.hourlyRate}/hour for first child, plus an incremental rate for each extra child.
-              </span>
-            </div>
-          </button>
-
-          {/* Option C: Per Child */}
-          <button
-            type="button"
-            onClick={() => setField('pricingModel', 'per_child')}
-            className={`w-full p-4 border rounded-2xl text-left transition-all active-press flex items-start gap-3 w-full ${
-              data.pricingModel === 'per_child' ? 'border-primary bg-emerald-50/45' : 'border-stone-200 hover:bg-stone-50'
-            }`}
-          >
-            <div className={`mt-0.5 h-4 w-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
-              data.pricingModel === 'per_child' ? 'border-primary text-primary' : 'border-stone-300'
-            }`}>
-              {data.pricingModel === 'per_child' && <div className="h-2 w-2 rounded-full bg-primary" />}
-            </div>
-            <div>
-              <strong className="block text-xs text-heading">Per-child pricing</strong>
-              <span className="text-[10px] text-stone-500">${data.hourlyRate}/hour per child.</span>
-            </div>
-          </button>
-        </div>
-
-        {/* Incremental Rate input if Additional Child is selected */}
-        {data.pricingModel === 'additional_child' && (
-          <div className="mt-4 p-4 bg-stone-50 rounded-2xl border border-stone-200 space-y-2 animate-fadeIn">
-            <label className="block text-[10px] font-bold text-stone-400 uppercase">
-              Additional Child Rate ($/hr)
-            </label>
-            <input
-              type="number"
-              min={0}
-              max={25}
-              step={0.5}
-              value={data.additionalChildRate}
-              onChange={e => setField('additionalChildRate', Number(e.target.value))}
-              className="w-full p-3 rounded-xl border border-stone-200 text-xs bg-white outline-none focus:border-primary"
-              placeholder="e.g. 5"
-            />
-            <p className="text-[9px] text-stone-400 font-semibold">Each additional child adds ${data.additionalChildRate}/hr to your base rate.</p>
-          </div>
-        )}
-      </Card>
-
-      {/* 4. Live Pricing Preview Matrix */}
-      <Card title="Live Pricing Preview" icon={<Sparkles className="h-4 w-4 text-amber-500" />}>
-        <p className="text-[10.5px] text-stone-500 mb-3 font-semibold">Here is a live calculation showing exactly what parents will see based on child count:</p>
-        <div className="grid grid-cols-2 gap-2 text-xs font-semibold">
-          {[1, 2, 3, 4].map(numKids => {
-            const calculatedRate = getPreviewRate(numKids);
-            const exceedsCap = numKids > data.maxChildren;
-            return (
-              <div
-                key={numKids}
-                className={`p-3 rounded-xl border flex flex-col justify-between ${
-                  exceedsCap 
-                    ? 'bg-red-50/50 border-red-100 opacity-60 text-red-700' 
-                    : 'bg-stone-50 border-stone-150 text-stone-700'
-                }`}
-              >
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-[10px] uppercase font-bold text-stone-400">
-                    {numKids} Child{numKids > 1 ? 'ren' : ''}
-                  </span>
-                  {exceedsCap && (
-                    <span className="text-[8px] bg-red-100 text-red-800 px-1.5 py-0.5 rounded-full font-black font-display uppercase tracking-wider">
-                      Over Cap
-                    </span>
-                  )}
-                </div>
-                <div className="font-display text-lg font-black text-heading">
-                  ${calculatedRate}/hr
-                </div>
-              </div>
-            );
-          })}
         </div>
       </Card>
     </div>
   );
 }
 
-// ─── Step 7: Identity Verification ───────────────────────────
+// ─── Step 7: Verification ──────────────────────────────────────
 function Step7Verification({ data, setField }: any) {
   return (
     <div className="space-y-4">
-      <div className="bg-gradient-to-br from-blue-500 to-indigo-600 rounded-3xl p-6 text-white space-y-3">
-        <div className="p-3 bg-white/15 rounded-2xl w-fit">
-          <ShieldCheck className="h-6 w-6 text-white" />
-        </div>
-        <h2 className="font-display text-lg font-black">Verify Your Identity</h2>
-        <p className="text-sm text-blue-100 leading-relaxed">
-          We verify sitter identities to help keep our community safe. Your documents are stored in a private,
-          encrypted vault — never publicly accessible or shared without your consent.
-        </p>
-      </div>
-
-      <Card title="Government-Issued ID">
-        <p className="text-[11px] text-stone-500 mb-3">Upload a clear photo of your government-issued photo ID (driver's licence, passport, or provincial ID).</p>
-        <div className="grid grid-cols-2 gap-3">
-          {['ID Front', 'ID Back'].map(side => (
-            <div key={side} className="border-2 border-dashed border-stone-200 rounded-2xl p-5 text-center hover:border-primary transition-colors cursor-pointer">
-              <Upload className="h-5 w-5 text-stone-400 mx-auto mb-2" />
-              <p className="text-[11px] font-bold text-stone-500">{side}</p>
-              <p className="text-[10px] text-stone-400">JPG, PNG, PDF</p>
-            </div>
-          ))}
+      <Card title="Identity Verification">
+        <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-2xl space-y-2 text-xs text-emerald-900">
+          <div className="flex items-center gap-2 font-bold">
+            <ShieldCheck className="h-5 w-5 text-primary" />
+            <span>Government ID Check</span>
+          </div>
+          <p className="text-[11px] leading-relaxed">
+            NestCare verifies government ID for all caregivers. You can submit your ID now or resume this step later.
+          </p>
         </div>
       </Card>
-
-      <Card title="Selfie / Liveness Check">
-        <p className="text-[11px] text-stone-500 mb-3">Upload a clear selfie to confirm the ID belongs to you.</p>
-        <div className="border-2 border-dashed border-stone-200 rounded-2xl p-6 text-center hover:border-primary transition-colors cursor-pointer">
-          <Upload className="h-6 w-6 text-stone-400 mx-auto mb-2" />
-          <p className="text-[11px] font-bold text-stone-500">Upload Selfie</p>
-          <p className="text-[10px] text-stone-400">Clear, well-lit photo of your face</p>
-        </div>
-      </Card>
-
-      <div className="bg-stone-50 border border-stone-200 rounded-2xl p-3.5 flex gap-2.5">
-        <Info className="h-4 w-4 text-stone-500 shrink-0 mt-0.5" />
-        <p className="text-[11px] text-stone-500 leading-relaxed">
-          <strong>Note:</strong> This step is currently processed manually by our admin team. You'll receive an email once your identity has been verified (typically within 1 business day). You can skip this for now and complete it later.
-        </p>
-      </div>
     </div>
   );
 }
 
-// ─── Step 8: Background Screening ────────────────────────────
+// ─── Step 8: Background ────────────────────────────────────────
 function Step8Background() {
-  const stages = ['Not Started', 'Submitted', 'Processing', 'Approved'];
   return (
     <div className="space-y-4">
-      <div className="bg-gradient-to-br from-stone-800 to-stone-900 rounded-3xl p-6 text-white space-y-3">
-        <div className="p-3 bg-white/10 rounded-2xl w-fit">
-          <Search className="h-6 w-6 text-white" />
-        </div>
-        <h2 className="font-display text-lg font-black">Background Screening</h2>
-        <p className="text-sm text-stone-300 leading-relaxed">
-          A background check helps families feel confident choosing you. Completing this step
-          unlocks the <strong className="text-white">Background Check Completed</strong> badge on your public profile.
-        </p>
-      </div>
-
-      <Card title="Current Status">
-        <div className="flex items-center justify-between gap-2">
-          {stages.map((stage, i) => (
-            <div key={stage} className="flex flex-col items-center flex-1 gap-1.5">
-              <div className={`h-2 w-2 rounded-full ${i === 0 ? 'bg-stone-400 ring-2 ring-stone-200 ring-offset-1' : 'bg-stone-200'}`} />
-              <span className={`text-[9px] font-bold text-center leading-tight ${i === 0 ? 'text-stone-600' : 'text-stone-300'}`}>{stage}</span>
-            </div>
-          ))}
-        </div>
-        <div className="h-px bg-stone-100 -mx-4 my-3" />
-        <div className="flex items-center gap-2 px-1">
-          <div className="h-2.5 w-2.5 rounded-full bg-stone-300" />
-          <span className="text-xs text-stone-500 font-semibold">Not Started</span>
+      <Card title="Background Screening Check">
+        <div className="p-4 bg-stone-50 border border-stone-100 rounded-2xl space-y-2 text-xs text-stone-700">
+          <h3 className="font-bold text-stone-900 flex items-center gap-2">
+            <UserCheck className="h-4 w-4 text-primary" /> Criminal Record Check
+          </h3>
+          <p className="text-[11px] leading-relaxed text-stone-500">
+            Background screening is required before receiving your first parent booking request.
+          </p>
         </div>
       </Card>
+    </div>
+  );
+}
 
-      <Card title="What's Included">
-        {['Criminal record check (RCMP/local)', 'Sex offender registry check', 'Vulnerable sector screening', 'Identity cross-reference'].map(item => (
-          <div key={item} className="flex items-center gap-2.5 text-xs text-stone-600">
-            <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
-            {item}
+// ─── Step 9: References ────────────────────────────────────────
+function Step9References({ refs, setRefs }: any) {
+  const addRef = () => setRefs((prev: any) => [...prev, { name: '', relationship: '', phone: '', email: '', knownYears: 1, consent: false }]);
+  const updateRef = (idx: number, key: string, val: any) => {
+    const next = [...refs];
+    next[idx][key] = val;
+    setRefs(next);
+  };
+  const removeRef = (idx: number) => setRefs((prev: any) => prev.filter((_: any, i: number) => i !== idx));
+
+  return (
+    <div className="space-y-4">
+      <Card title="Childcare References">
+        {refs.map((r: any, idx: number) => (
+          <div key={idx} className="p-3.5 bg-stone-50 border border-stone-100 rounded-2xl space-y-3 relative">
+            <div className="flex justify-between items-center">
+              <span className="text-xs font-bold text-stone-800">Reference #{idx + 1}</span>
+              {refs.length > 1 && (
+                <button type="button" onClick={() => removeRef(idx)} className="text-stone-400 hover:text-red-500">
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <input type="text" placeholder="Full Name" value={r.name} onChange={e => updateRef(idx, 'name', e.target.value)}
+                className="p-3 rounded-xl border border-stone-200 bg-white" />
+              <input type="text" placeholder="Relationship (e.g. Parent)" value={r.relationship} onChange={e => updateRef(idx, 'relationship', e.target.value)}
+                className="p-3 rounded-xl border border-stone-200 bg-white" />
+              <input type="tel" placeholder="Phone Number" value={r.phone} onChange={e => updateRef(idx, 'phone', e.target.value)}
+                className="p-3 rounded-xl border border-stone-200 bg-white" />
+              <input type="email" placeholder="Email Address" value={r.email} onChange={e => updateRef(idx, 'email', e.target.value)}
+                className="p-3 rounded-xl border border-stone-200 bg-white" />
+            </div>
           </div>
         ))}
-      </Card>
-
-      <button className="w-full py-3.5 bg-stone-800 text-white rounded-2xl text-xs font-bold hover:bg-stone-900 active-press transition-colors">
-        Begin Background Check →
-      </button>
-
-      <div className="bg-amber-50 border border-amber-100 rounded-2xl p-3.5 flex gap-2.5">
-        <Info className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-        <p className="text-[11px] text-amber-800">You can continue onboarding and complete your background check later. It's required before you can receive verified bookings.</p>
-      </div>
-    </div>
-  );
-}
-
-// ─── Step 9: References ───────────────────────────────────────
-function Step9References({ refs, setRefs }: { refs: Reference[]; setRefs: (r: Reference[]) => void }) {
-  const updateRef = (i: number, field: keyof Reference, val: any) => {
-    const updated = [...refs];
-    updated[i] = { ...updated[i], [field]: val };
-    setRefs(updated);
-  };
-  const addRef = () => setRefs([...refs, { name: '', relationship: '', phone: '', email: '', knownYears: 1, consent: false }]);
-  const removeRef = (i: number) => setRefs(refs.filter((_, idx) => idx !== i));
-
-  return (
-    <div className="space-y-4">
-      <p className="text-xs text-stone-500">Provide up to 3 references who can speak to your childcare experience. References will only be contacted if families request it and you provide consent.</p>
-      {refs.map((ref, i) => (
-        <div key={i} className="bg-white border border-stone-200 rounded-3xl p-4 shadow-sm space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-stone-700">Reference #{i + 1}</span>
-            {refs.length > 1 && (
-              <button onClick={() => removeRef(i)} className="p-1.5 text-red-400 hover:text-red-600 rounded-lg hover:bg-red-50 transition-colors">
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
-          <Field label="Full Name" value={ref.name} onChange={v => updateRef(i, 'name', v)} placeholder="Dr. Sarah Johnson" />
-          <Field label="Relationship" value={ref.relationship} onChange={v => updateRef(i, 'relationship', v)} placeholder="e.g. Former employer, Family friend" />
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Phone" value={ref.phone} onChange={v => updateRef(i, 'phone', v)} placeholder="+1 (780) 555-0100" type="tel" />
-            <Field label="Email" value={ref.email} onChange={v => updateRef(i, 'email', v)} placeholder="sarah@example.com" type="email" />
-          </div>
-          <div>
-            <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">Years Known</label>
-            <select value={ref.knownYears} onChange={e => updateRef(i, 'knownYears', Number(e.target.value))}
-              className="w-full p-3 rounded-2xl border border-stone-200 text-xs bg-stone-50 outline-none focus:border-primary appearance-none">
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(y => <option key={y} value={y}>{y} year{y > 1 ? 's' : ''}</option>)}
-            </select>
-          </div>
-          <label className="flex items-start gap-2.5 cursor-pointer p-2.5 bg-stone-50 rounded-xl">
-            <input type="checkbox" checked={ref.consent} onChange={e => updateRef(i, 'consent', e.target.checked)} className="mt-0.5 rounded accent-primary" />
-            <span className="text-[11px] text-stone-600 leading-relaxed">I confirm this person is aware they may be contacted as a reference and has given their consent.</span>
-          </label>
-        </div>
-      ))}
-      {refs.length < 3 && (
-        <button onClick={addRef} className="w-full py-3 border-2 border-dashed border-stone-200 hover:border-primary text-stone-500 hover:text-primary rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-2">
+        <button type="button" onClick={addRef} className="w-full py-3 border border-dashed border-stone-300 text-stone-600 rounded-2xl text-xs font-bold hover:bg-stone-50 flex items-center justify-center gap-1.5">
           <Plus className="h-4 w-4" /> Add Another Reference
         </button>
-      )}
+      </Card>
     </div>
   );
 }
 
-// ─── Step 10: Transportation ──────────────────────────────────
+// ─── Step 10: Transportation ───────────────────────────────────
 function Step10Transportation({ data, setField }: any) {
   return (
     <div className="space-y-4">
-      <Card title="Do you offer transportation services?">
-        <div className="grid grid-cols-2 gap-3">
-          {[true, false].map(val => (
-            <button key={String(val)} type="button"
-              onClick={() => setField('offersTransport', val)}
-              className={`p-4 rounded-2xl border text-center transition-all active-press ${data.offersTransport === val ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-stone-50 border-stone-200 text-stone-600 hover:bg-stone-100'}`}
-            >
-              <div className="flex justify-center mb-1">
-                {val ? <Car className="h-6 w-6 text-primary" /> : <Footprints className="h-6 w-6 text-stone-400" />}
-              </div>
-              <span className="text-xs font-bold">{val ? 'Yes, I can drive children' : 'No, I don\'t drive'}</span>
-            </button>
-          ))}
-        </div>
-      </Card>
-
-      {data.offersTransport && (
-        <>
-          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 flex gap-2.5">
-            <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-            <p className="text-[11px] text-amber-800 leading-relaxed">Transportation services require additional insurance verification. Please ensure your auto insurance policy covers transporting clients' children.</p>
-          </div>
-          <Card title="Driver Information">
-            <label className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${data.hasDriversLicense ? 'bg-emerald-50 border-emerald-200' : 'bg-stone-50 border-stone-150'}`}>
-              <input type="checkbox" checked={data.hasDriversLicense} onChange={e => setField('hasDriversLicense', e.target.checked)} className="rounded accent-primary" />
-              <span className="text-xs font-semibold text-stone-700">I hold a valid driver's licence</span>
-            </label>
-            <Field label="Vehicle Information" value={data.vehicleInfo}
-              onChange={v => setField('vehicleInfo', v)}
-              placeholder="e.g. 2020 Honda Pilot — 7 seats, booster seat available" />
-            <label className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${data.transportationInsurance ? 'bg-emerald-50 border-emerald-200' : 'bg-stone-50 border-stone-150'}`}>
+      <Card title="Transportation & Driver Info">
+        <label className="flex items-center gap-2.5 p-3 rounded-xl bg-stone-50 border border-stone-100 cursor-pointer">
+          <input type="checkbox" checked={data.hasDriversLicense} onChange={e => setField('hasDriversLicense', e.target.checked)} className="rounded accent-primary" />
+          <span className="text-xs font-bold text-stone-800">I possess a valid Driver's License</span>
+        </label>
+        {data.hasDriversLicense && (
+          <div className="space-y-3 pt-2">
+            <Field label="Vehicle Make / Model (Optional)" value={data.vehicleInfo} onChange={(v: string) => setField('vehicleInfo', v)} placeholder="e.g. 2021 Toyota RAV4" />
+            <label className="flex items-center gap-2.5 p-3 rounded-xl bg-stone-50 border border-stone-100 cursor-pointer">
               <input type="checkbox" checked={data.transportationInsurance} onChange={e => setField('transportationInsurance', e.target.checked)} className="rounded accent-primary" />
-              <span className="text-xs font-semibold text-stone-700">My insurance policy covers transporting clients' children</span>
+              <span className="text-xs font-bold text-stone-800">I have active vehicle insurance coverage</span>
             </label>
-          </Card>
-        </>
-      )}
+          </div>
+        )}
+      </Card>
     </div>
   );
 }
 
-// ─── Step 11: Safety Agreement ────────────────────────────────
+// ─── Step 11: Safety Agreement ───────────────────────────────
 function Step11Safety({ safetyRef, safetyScrolled, setSafetyScrolled, data, setField }: any) {
   return (
     <div className="space-y-4">
-      <div className="bg-gradient-to-br from-red-500 to-rose-600 rounded-3xl p-6 text-white space-y-2">
-        <div className="p-3 bg-white/15 rounded-2xl w-fit">
-          <AlertTriangle className="h-6 w-6 text-white" />
+      <Card title="Child Safety Commitment">
+        <div
+          ref={safetyRef}
+          onScroll={() => {
+            if (safetyRef.current) {
+              const { scrollTop, scrollHeight, clientHeight } = safetyRef.current;
+              if (scrollTop + clientHeight >= scrollHeight - 20) {
+                setSafetyScrolled(true);
+              }
+            }
+          }}
+          className="max-h-56 overflow-y-auto p-4 bg-stone-50 border border-stone-200 rounded-2xl text-xs space-y-2 leading-relaxed"
+        >
+          {SAFETY_CLAUSES.map((clause, idx) => (
+            <p key={idx} className="text-stone-700 font-medium">
+              <strong>{idx + 1}.</strong> {clause}
+            </p>
+          ))}
         </div>
-        <h2 className="font-display text-lg font-black">Child Safety Commitment</h2>
-        <p className="text-sm text-red-100">Please read all clauses carefully, then confirm your commitment below.</p>
-      </div>
-      <div
-        ref={safetyRef}
-        onScroll={e => {
-          const el = e.currentTarget;
-          if (el.scrollTop + el.clientHeight >= el.scrollHeight - 20) setSafetyScrolled(true);
-        }}
-        className="bg-white border border-stone-200 rounded-3xl p-5 max-h-72 overflow-y-auto space-y-3 shadow-sm"
-      >
-        {SAFETY_CLAUSES.map((clause, i) => (
-          <div key={i} className="flex gap-3 text-xs text-stone-600 leading-relaxed">
-            <span className="font-display font-black text-stone-300 text-sm shrink-0 mt-0.5">{i + 1}.</span>
-            <p>{clause}</p>
-          </div>
-        ))}
-        <div className="h-4" />
-      </div>
-      {!safetyScrolled && (
-        <p className="text-center text-[11px] text-stone-400 font-bold">↑ Scroll to the end to continue</p>
-      )}
-      {safetyScrolled && (
-        <label className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-2xl cursor-pointer">
-          <input type="checkbox" checked={data.safetyAgreed} onChange={e => setField('safetyAgreed', e.target.checked)} className="mt-0.5 rounded accent-red-500" />
-          <span className="text-xs text-red-800 font-semibold leading-relaxed">
-            I have read and fully understand this Child Safety Commitment. I agree to uphold these standards in every care situation and acknowledge that violations may result in account suspension.
-          </span>
+        <label className="flex items-center gap-2.5 p-3 rounded-xl bg-emerald-50 border border-emerald-100 cursor-pointer">
+          <input type="checkbox" checked={data.safetyAgreed} onChange={e => setField('safetyAgreed', e.target.checked)} className="rounded accent-primary" />
+          <span className="text-xs font-bold text-emerald-900">I have read and agree to all Child Safety Standards</span>
         </label>
-      )}
+      </Card>
     </div>
   );
 }
@@ -1195,70 +1132,15 @@ function Step11Safety({ safetyRef, safetyScrolled, setSafetyScrolled, data, setF
 function Step12Agreement({ data, setField }: any) {
   return (
     <div className="space-y-4">
-      <div className="bg-gradient-to-br from-stone-800 to-stone-900 rounded-3xl p-6 text-white space-y-3">
-        <div className="p-3 bg-white/10 rounded-2xl w-fit">
-          <FileText className="h-6 w-6 text-white" />
-        </div>
-        <h2 className="font-display text-lg font-black">Provider Agreement</h2>
-        <p className="text-sm text-stone-300">Review and accept our Sitter Terms of Service to activate your account.</p>
-      </div>
-      <Card title="Summary of Key Terms">
-        {[
-          'You are an independent contractor — not an employee of NestCare.',
-          'You must honour all confirmed bookings or provide timely cancellation.',
-          'Off-platform payment arrangements are strictly prohibited.',
-          'NestCare charges a 10% platform fee on all completed bookings.',
-          'You must comply with all applicable local laws regarding childcare.',
-          'Violations of our policies may result in immediate account suspension.',
-        ].map((term, i) => (
-          <div key={i} className="flex gap-2.5 text-xs text-stone-600 leading-relaxed">
-            <span className="h-1.5 w-1.5 rounded-full bg-stone-300 shrink-0 mt-1.5" />
-            <span>{term}</span>
-          </div>
-        ))}
+      <Card title="NestCare Provider Terms">
+        <p className="text-xs text-stone-600 leading-relaxed font-medium">
+          By submitting your caregiver profile, you agree to uphold NestCare marketplace policies, maintain punctual care delivery, and abide by the Provider Code of Conduct.
+        </p>
+        <label className="flex items-center gap-2.5 p-3 rounded-xl bg-emerald-50 border border-emerald-100 cursor-pointer">
+          <input type="checkbox" checked={data.providerAgreed} onChange={e => setField('providerAgreed', e.target.checked)} className="rounded accent-primary" />
+          <span className="text-xs font-bold text-emerald-900">I accept the NestCare Caregiver Terms of Service</span>
+        </label>
       </Card>
-      <a href="/terms" target="_blank" rel="noopener noreferrer"
-        className="flex items-center justify-between p-4 bg-stone-50 border border-stone-200 rounded-2xl hover:bg-stone-100 transition-colors">
-        <span className="text-xs font-bold text-stone-700">Read full Sitter Agreement</span>
-        <ChevronRight className="h-4 w-4 text-stone-400" />
-      </a>
-      <label className="flex items-start gap-3 p-4 bg-emerald-50 border border-emerald-200 rounded-2xl cursor-pointer">
-        <input type="checkbox" checked={data.providerAgreed} onChange={e => setField('providerAgreed', e.target.checked)} className="mt-0.5 rounded accent-primary" />
-        <span className="text-xs text-emerald-800 font-semibold leading-relaxed">
-          ☑ I have read and agree to the NestCare Sitter Agreement and Terms of Service.
-        </span>
-      </label>
-      {data.providerAgreed && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3 flex items-center gap-2.5">
-          <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
-          <p className="text-[11px] text-emerald-800 font-semibold">You're ready to submit. Click "Submit Application" below!</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Shared UI Components ─────────────────────────────────────
-function Card({ title, icon, children }: { title: string; icon?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <div className="bg-white border border-stone-200 rounded-3xl p-5 shadow-sm space-y-3.5">
-      <h3 className="text-xs font-black text-heading flex items-center gap-2">
-        {icon} {title}
-      </h3>
-      {children}
-    </div>
-  );
-}
-
-function Field({ label, value, onChange, placeholder, type = 'text' }: {
-  label: string; value: string; onChange: (v: string) => void;
-  placeholder?: string; type?: string;
-}) {
-  return (
-    <div>
-      <label className="block text-[10px] font-bold text-stone-400 uppercase mb-1">{label}</label>
-      <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-        className="w-full p-3.5 rounded-2xl border border-stone-200 text-xs bg-stone-50 outline-none focus:border-primary transition-colors" />
     </div>
   );
 }

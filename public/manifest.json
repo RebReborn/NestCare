@@ -1,0 +1,43 @@
+{
+  "name": "NestCare",
+  "short_name": "NestCare",
+  "description": "Trusted childcare and babysitting marketplace. Book background-checked caregivers near you.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#065f46",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "lang": "en-CA",
+  "categories": ["childcare", "lifestyle", "family"],
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Find a Caregiver",
+      "short_name": "Search",
+      "description": "Search for available childcare providers near you",
+      "url": "/search",
+      "icons": [{ "src": "/logo.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "My Bookings",
+      "short_name": "Bookings",
+      "description": "View and manage your childcare bookings",
+      "url": "/bookings",
+      "icons": [{ "src": "/logo.png", "sizes": "96x96" }]
+    }
+  ]
+}
