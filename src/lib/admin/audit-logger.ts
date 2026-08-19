@@ -192,7 +192,11 @@ export async function logAdminAction(params: LogAdminActionParams): Promise<bool
     }
 
     // Insert into admin_audit_logs for explicit naming compatibility
-    await supabase.from('admin_audit_logs').insert(auditEntry).then(() => {}).catch(() => {});
+    try {
+      await supabase.from('admin_audit_logs').insert(auditEntry);
+    } catch {
+      // Ignore if table view collision
+    }
 
     console.log(`[Admin Audit Logged] Action: ${params.action} | Severity: ${severity} | Hash: ${currentHash.substring(0, 10)}...`);
     return true;
