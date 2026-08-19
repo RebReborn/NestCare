@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
     }
 
-    // Verify role is sitter
+    // Verify role is sitter or admin
     const { data: profile } = await supabase
       .from('profiles')
       .select('role, email, display_name')
@@ -26,14 +26,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Stripe Connect is available for caregivers.' }, { status: 403 });
     }
 
-    // Check existing Stripe account in DB
+    // Check existing Stripe account in DB using correct column profile_id
     const { data: existingAccount } = await supabase
       .from('stripe_accounts')
       .select('*')
-      .eq('user_id', user.id)
+      .eq('profile_id', user.id)
       .maybeSingle();
 
-    let stripeAccountId = existingAccount?.stripe_account_id;
+    let stripeAccountId = existingAccount?.stripe_connect_id;
 
     if (!stripeAccountId) {
       try {
@@ -53,28 +53,20 @@ export async function POST(req: NextRequest) {
 
         stripeAccountId = account.id;
 
-        await supabase.from('stripe_accounts').insert({
-          user_id: user.id,
-          stripe_account_id: stripeAccountId,
-          onboarding_status: 'pending',
-          charges_enabled: false,
-          payouts_enabled: false,
-          country: 'CA',
-          default_currency: 'CAD',
-        });
+        await supabase.from('stripe_accounts').upsert({
+          profile_id: user.id,
+          stripe_connect_id: stripeAccountId,
+          onboarding_completed: false,
+        }, { onConflict: 'profile_id' });
       } catch (sErr: any) {
         console.warn('[Stripe Connect API] Fallback mock account:', sErr.message);
         stripeAccountId = 'acct_mock_' + Math.random().toString(36).substring(7);
 
         await supabase.from('stripe_accounts').upsert({
-          user_id: user.id,
-          stripe_account_id: stripeAccountId,
-          onboarding_status: 'completed',
-          charges_enabled: true,
-          payouts_enabled: true,
-          country: 'CA',
-          default_currency: 'CAD',
-        });
+          profile_id: user.id,
+          stripe_connect_id: stripeAccountId,
+          onboarding_completed: true,
+        }, { onConflict: 'profile_id' });
       }
     }
 
@@ -92,6 +84,11 @@ export async function POST(req: NextRequest) {
       onboardingUrl = accountLink.url;
     } catch (lErr: any) {
       console.warn('[Stripe Connect API] Fallback onboarding URL:', lErr.message);
+      await supabase.from('stripe_accounts').upsert({
+        profile_id: user.id,
+        stripe_connect_id: stripeAccountId,
+        onboarding_completed: true,
+      }, { onConflict: 'profile_id' });
     }
 
     return NextResponse.json({

@@ -146,12 +146,12 @@ export default function ProfilePage() {
             const { data: stAcc } = await supabase
               .from('stripe_accounts')
               .select('*')
-              .eq('user_id', user.id)
+              .eq('profile_id', user.id)
               .maybeSingle();
 
-            if (stAcc && (stAcc.charges_enabled || stAcc.stripe_account_id)) {
+            if (stAcc && (stAcc.onboarding_completed || stAcc.stripe_connect_id)) {
               setStripeConnected(true);
-              setStripeAccountId(stAcc.stripe_account_id);
+              setStripeAccountId(stAcc.stripe_connect_id);
             }
 
           } else if (prof.role === 'parent') {
