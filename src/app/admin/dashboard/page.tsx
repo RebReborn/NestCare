@@ -2143,6 +2143,8 @@ export default function AdminDashboardPage() {
             </form>
           </div>
         </div>
+      )}
+
       {/* AUDIT LOG JSON PAYLOAD INSPECTOR MODAL */}
       {inspectingAuditLog && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
