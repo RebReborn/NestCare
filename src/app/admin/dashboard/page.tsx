@@ -32,7 +32,10 @@ import {
   Eye,
   User,
   AlertTriangle,
-  Wrench
+  Wrench,
+  Lock,
+  Unlock,
+  KeyRound
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
@@ -44,6 +47,49 @@ export default function AdminDashboardPage() {
 
   // Active Tab
   const [activeTab, setActiveTab] = useState<TabType>('overview');
+
+  // Protected Access Passcode Security State (Code: 2020)
+  const [isProtectedAccessUnlocked, setIsProtectedAccessUnlocked] = useState(false);
+  const [passcodeModalOpen, setPasscodeModalOpen] = useState(false);
+  const [targetProtectedTab, setTargetProtectedTab] = useState<'settings' | 'audit' | null>(null);
+  const [passcodeInput, setPasscodeInput] = useState('');
+  const [passcodeError, setPasscodeError] = useState(false);
+
+  const handleTabClick = (tabId: TabType) => {
+    if ((tabId === 'settings' || tabId === 'audit') && !isProtectedAccessUnlocked) {
+      setTargetProtectedTab(tabId);
+      setPasscodeInput('');
+      setPasscodeError(false);
+      setPasscodeModalOpen(true);
+      return;
+    }
+    setActiveTab(tabId);
+  };
+
+  const handleUnlockProtectedAccess = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (passcodeInput.trim() === '2020') {
+      setIsProtectedAccessUnlocked(true);
+      setPasscodeModalOpen(false);
+      setPasscodeError(false);
+      if (targetProtectedTab) {
+        setActiveTab(targetProtectedTab);
+        setTargetProtectedTab(null);
+      }
+      toast.success('Admin Security Clearance Granted (Passcode 2020 Verified)');
+    } else {
+      setPasscodeError(true);
+      toast.error('Incorrect Security Passcode. Access Denied.');
+    }
+  };
+
+  const handleRelockProtectedAccess = () => {
+    setIsProtectedAccessUnlocked(false);
+    if (activeTab === 'settings' || activeTab === 'audit') {
+      setActiveTab('overview');
+    }
+    toast.info('Protected Admin Controls Re-locked');
+  };
 
   // Metrics
   const [metrics, setMetrics] = useState<any>({
@@ -580,44 +626,61 @@ export default function AdminDashboardPage() {
       </div>
 
       {/* Navigation Tabs */}
-      <div className="flex items-center gap-1.5 border-b border-stone-200 dark:border-slate-800 pb-2 overflow-x-auto">
-        {[
-          { id: 'overview', label: 'Overview', icon: Activity },
-          { id: 'users', label: 'User Directory', count: allUsers.length, icon: Users },
-          { id: 'bookings', label: 'Bookings', count: allBookings.length, icon: Calendar },
-          { id: 'queue', label: 'Verification Queue', count: pendingSitters.length, icon: ShieldCheck, alert: pendingSitters.length > 0 },
-          { id: 'disputes', label: 'Disputes', count: disputes.length, icon: ShieldAlert, alert: disputes.length > 0 },
-          { id: 'reports', label: 'User Reports', count: userReports.filter(r => r.status === 'pending').length, icon: Flag, alert: userReports.filter(r => r.status === 'pending').length > 0 },
-          { id: 'messages', label: 'Chat Moderation', count: flaggedMessages.length + messageReports.filter(r => r.status === 'pending').length, icon: MessageSquare, alert: flaggedMessages.length > 0 },
-          { id: 'settings', label: 'Platform Settings & Maintenance', icon: Settings, alert: platformSettings.is_maintenance_mode },
-          { id: 'audit', label: 'Audit Logs', icon: FileText },
-        ].map((tab) => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as TabType)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-extrabold whitespace-nowrap transition-all ${
-                isActive
-                  ? 'bg-primary text-white shadow-md'
-                  : 'text-stone-600 dark:text-slate-300 hover:bg-stone-100 dark:hover:bg-slate-800'
-              }`}
-            >
-              <Icon className="h-4 w-4" />
-              <span>{tab.label}</span>
-              {tab.count !== undefined && (
-                <span className={`text-[10px] px-2 py-0.5 rounded-full ${
-                  tab.alert
-                    ? 'bg-red-500 text-white font-extrabold animate-pulse'
-                    : isActive ? 'bg-white/20 text-white' : 'bg-stone-200 dark:bg-slate-700 text-stone-700 dark:text-slate-200'
-                }`}>
-                  {tab.count}
-                </span>
-              )}
-            </button>
-          );
-        })}
+      <div className="flex items-center justify-between gap-3 border-b border-stone-200 dark:border-slate-800 pb-2">
+        <div className="flex items-center gap-1.5 overflow-x-auto">
+          {[
+            { id: 'overview', label: 'Overview', icon: Activity },
+            { id: 'users', label: 'User Directory', count: allUsers.length, icon: Users },
+            { id: 'bookings', label: 'Bookings', count: allBookings.length, icon: Calendar },
+            { id: 'queue', label: 'Verification Queue', count: pendingSitters.length, icon: ShieldCheck, alert: pendingSitters.length > 0 },
+            { id: 'disputes', label: 'Disputes', count: disputes.length, icon: ShieldAlert, alert: disputes.length > 0 },
+            { id: 'reports', label: 'User Reports', count: userReports.filter(r => r.status === 'pending').length, icon: Flag, alert: userReports.filter(r => r.status === 'pending').length > 0 },
+            { id: 'messages', label: 'Chat Moderation', count: flaggedMessages.length + messageReports.filter(r => r.status === 'pending').length, icon: MessageSquare, alert: flaggedMessages.length > 0 },
+            { id: 'settings', label: 'Platform Settings & Maintenance', icon: Settings, alert: platformSettings.is_maintenance_mode, protected: true },
+            { id: 'audit', label: 'Audit Logs', icon: FileText, protected: true },
+          ].map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => handleTabClick(tab.id as TabType)}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-extrabold whitespace-nowrap transition-all ${
+                  isActive
+                    ? 'bg-primary text-white shadow-md'
+                    : 'text-stone-600 dark:text-slate-300 hover:bg-stone-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+                <span>{tab.label}</span>
+                {tab.protected && (
+                  <span className="text-[11px]" title={isProtectedAccessUnlocked ? 'Security Unlocked' : 'Passcode Protected (Code: 2020)'}>
+                    {isProtectedAccessUnlocked ? '🔓' : '🔒'}
+                  </span>
+                )}
+                {tab.count !== undefined && (
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full ${
+                    tab.alert
+                      ? 'bg-red-500 text-white font-extrabold animate-pulse'
+                      : isActive ? 'bg-white/20 text-white' : 'bg-stone-200 dark:bg-slate-700 text-stone-700 dark:text-slate-200'
+                  }`}>
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {isProtectedAccessUnlocked && (
+          <button
+            onClick={handleRelockProtectedAccess}
+            className="px-3.5 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-xs font-extrabold active-press transition-colors shrink-0 flex items-center gap-1.5"
+            title="Lock Platform Settings & Audit Logs"
+          >
+            <Lock className="h-3.5 w-3.5" /> Re-lock Controls
+          </button>
+        )}
       </div>
 
       {/* TAB 1: OVERVIEW */}
@@ -1779,6 +1842,73 @@ export default function AdminDashboardPage() {
                 Close Inspector
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* PASSCODE AUTHENTICATION MODAL (Code: 2020) */}
+      {passcodeModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl space-y-6">
+            <div className="flex flex-col items-center text-center space-y-3">
+              <div className="p-4 bg-amber-500/10 text-amber-500 rounded-2xl border border-amber-500/20">
+                <Lock className="h-8 w-8 text-amber-500" />
+              </div>
+              <h3 className="font-display text-xl font-black text-heading dark:text-white">
+                Protected System Access
+              </h3>
+              <p className="text-xs text-stone-500 dark:text-slate-400 font-medium leading-relaxed">
+                Accessing <strong className="text-heading dark:text-slate-200">{targetProtectedTab === 'settings' ? 'Platform Settings & Maintenance' : 'Audit Logs'}</strong> requires administrative passcode verification.
+              </p>
+            </div>
+
+            <form onSubmit={handleUnlockProtectedAccess} className="space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold text-stone-400 dark:text-slate-400 uppercase tracking-wider mb-2 text-center">
+                  Enter System Passcode
+                </label>
+                <input
+                  type="password"
+                  autoFocus
+                  maxLength={8}
+                  placeholder="••••"
+                  value={passcodeInput}
+                  onChange={(e) => {
+                    setPasscodeInput(e.target.value);
+                    setPasscodeError(false);
+                  }}
+                  className={`w-full p-4 rounded-2xl border outline-none text-center font-mono text-xl font-bold tracking-widest transition-colors ${
+                    passcodeError
+                      ? 'border-rose-500 bg-rose-500/10 text-rose-500'
+                      : 'border-stone-200 dark:border-slate-700 bg-stone-50 dark:bg-slate-800 text-stone-900 dark:text-slate-100 focus:border-primary'
+                  }`}
+                />
+                {passcodeError && (
+                  <p className="text-xs text-rose-500 font-bold text-center mt-2 flex items-center justify-center gap-1">
+                    <AlertCircle className="h-3.5 w-3.5" /> Incorrect Passcode. Access Denied.
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPasscodeModalOpen(false);
+                    setTargetProtectedTab(null);
+                  }}
+                  className="flex-1 py-3.5 rounded-2xl border border-stone-200 dark:border-slate-700 text-stone-600 dark:text-slate-300 text-xs font-bold hover:bg-stone-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-3.5 rounded-2xl bg-primary text-white text-xs font-bold hover:bg-emerald-800 active-press transition-colors shadow-md flex items-center justify-center gap-2"
+                >
+                  <KeyRound className="h-4 w-4" /> Unlock Access
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
